@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { NextRequest, NextResponse } from 'next/server'
-import { GenerateRequest, LearnContent, TopicOption, ClarifyResponse } from '@/lib/types'
+import { GenerateRequest, LearnContent, TopicOption, ClarifyResponse, ExpandedContent, LessonPlan } from '@/lib/types'
 
 const anthropic = new Anthropic({
   apiKey: process.env.CLAUDE_API_KEY,
@@ -18,7 +18,10 @@ function isValidLearnContent(obj: unknown): obj is LearnContent {
     typeof content.example === 'string' &&
     typeof content.micro_action === 'string' &&
     typeof content.quiz_question === 'string' &&
-    typeof content.quiz_answer === 'string'
+    typeof content.quiz_answer === 'string' &&
+    Array.isArray(content.sources) &&
+    content.sources.length >= 1 &&
+    content.sources.length <= 3
   )
 }
 
@@ -44,6 +47,32 @@ function isValidClarifyResponse(obj: unknown): obj is ClarifyResponse {
   )
 }
 
+function isValidExpandedContent(obj: unknown): obj is ExpandedContent {
+  if (typeof obj !== 'object' || obj === null) return false
+  const data = obj as Record<string, unknown>
+  return (
+    Array.isArray(data.paragraphs) &&
+    data.paragraphs.length >= 3 &&
+    data.paragraphs.length <= 6 &&
+    data.paragraphs.every((p: unknown) => typeof p === 'string')
+  )
+}
+
+function isValidLessonPlan(obj: unknown): boolean {
+  if (typeof obj !== 'object' || obj === null) return false
+  const data = obj as Record<string, unknown>
+  return (
+    Array.isArray(data.goals) &&
+    data.goals.length >= 2 &&
+    Array.isArray(data.resources) &&
+    data.resources.length >= 5 &&
+    Array.isArray(data.exercises) &&
+    data.exercises.length >= 3 &&
+    Array.isArray(data.daily_plan) &&
+    data.daily_plan.length >= 7
+  )
+}
+
 function getSystemPrompt(depth: 'concise' | 'deeper'): string {
   const depthInstruction = depth === 'concise' 
     ? 'Keep content crisp and scannable. Prioritize actionable insights over depth.'
@@ -55,7 +84,6 @@ Tone Guidelines:
 - Calm, smart, slightly analytical
 - Practical and insightful, never motivational or cheesy
 - Use professional/founder-relevant examples
-- No citations unless explicitly asked
 - Avoid medical or legal advice; if requested, provide general info and suggest verification
 
 Content Rules:
@@ -130,10 +158,91 @@ Respond with ONLY this JSON structure:
   "example": "A concrete 2-4 sentence example, preferably from business/professional context",
   "micro_action": "One specific thing to try today (max 140 characters)",
   "quiz_question": "A thoughtful question to test understanding",
-  "quiz_answer": "Brief, clear answer"
+  "quiz_answer": "Brief, clear answer",
+  "sources": [
+    {"title": "Source name or article title", "url": "https://credible-domain.com/relevant-path"},
+    {"title": "Another source", "url": "https://another-credible-site.com/path"}
+  ]
 }
 
+IMPORTANT for sources:
+- Include 1-3 credible, relevant sources
+- Use real, well-known publications (Harvard Business Review, MIT Sloan, McKinsey, reputable tech blogs, academic institutions)
+- URLs should be plausible paths to real articles (don't make up exact URLs, but use realistic domain/path patterns)
+- Sources should be directly relevant to the topic
+
 Ensure bullets are exactly 3 items. Make the micro_action immediately actionable.`
+
+    case 'expand_content':
+      return `Expand on this learning topic: "${topic}"
+
+Previous summary: "${prior_item?.title}: ${prior_item?.hook}"
+Key points covered: ${prior_item?.bullets?.join('; ')}
+
+Create a deeper exploration that adds significant value beyond the summary.
+
+Respond with ONLY this JSON structure:
+{
+  "paragraphs": [
+    "First paragraph - deeper context or background (3-4 sentences)",
+    "Second paragraph - key concept explained in more detail (3-4 sentences)", 
+    "Third paragraph - practical implications or nuances (3-4 sentences)",
+    "Fourth paragraph - advanced insight or counterintuitive take (3-4 sentences)",
+    "Fifth paragraph - how experts think about this differently (3-4 sentences)"
+  ],
+  "additional_bullets": [
+    "Advanced insight 1",
+    "Advanced insight 2",
+    "Advanced insight 3"
+  ]
+}
+
+Write 4-6 paragraphs. Each paragraph should be substantive (3-4 sentences). Don't repeat what was in the summary.`
+
+    case 'lesson_plan':
+      return `Create a comprehensive lesson plan for learning: "${topic}"
+
+Context from initial learning: "${prior_item?.title}"
+
+Respond with ONLY this JSON structure:
+{
+  "goals": [
+    "Learning goal 1 - specific, measurable outcome",
+    "Learning goal 2 - specific, measurable outcome",
+    "Learning goal 3 - specific, measurable outcome"
+  ],
+  "resources": [
+    {"title": "Resource name", "url": "https://credible-site.com/path", "type": "article"},
+    {"title": "Book recommendation", "url": "https://amazon.com/book", "type": "book"},
+    {"title": "Video course or talk", "url": "https://youtube.com/watch", "type": "video"},
+    {"title": "Online course", "url": "https://coursera.org/course", "type": "course"},
+    {"title": "Useful tool or app", "url": "https://tool-site.com", "type": "tool"}
+  ],
+  "exercises": [
+    "Practical exercise 1 - hands-on activity",
+    "Practical exercise 2 - reflection or analysis task",
+    "Practical exercise 3 - real-world application",
+    "Practical exercise 4 - peer discussion or teaching exercise"
+  ],
+  "daily_plan": [
+    {"day": 1, "focus": "Foundation - understanding core concepts", "activities": ["Read intro material", "Take notes on key terms"]},
+    {"day": 2, "focus": "Deep dive into first principle", "activities": ["Study resource 1", "Complete exercise 1"]},
+    {"day": 3, "focus": "Deep dive into second principle", "activities": ["Watch video content", "Practice application"]},
+    {"day": 4, "focus": "Connecting concepts", "activities": ["Review and connect ideas", "Exercise 2"]},
+    {"day": 5, "focus": "Real-world application", "activities": ["Apply to current project", "Document learnings"]},
+    {"day": 6, "focus": "Advanced concepts", "activities": ["Explore edge cases", "Exercise 3"]},
+    {"day": 7, "focus": "Review and consolidate", "activities": ["Quiz yourself", "Identify gaps"]},
+    {"day": 8, "focus": "Practical project start", "activities": ["Begin mini-project", "Set milestones"]},
+    {"day": 9, "focus": "Project continuation", "activities": ["Work on project", "Seek feedback"]},
+    {"day": 10, "focus": "Expert perspectives", "activities": ["Read advanced material", "Note different viewpoints"]},
+    {"day": 11, "focus": "Teaching to learn", "activities": ["Explain concepts to someone", "Exercise 4"]},
+    {"day": 12, "focus": "Integration", "activities": ["Connect to other knowledge", "Update notes"]},
+    {"day": 13, "focus": "Final project work", "activities": ["Complete project", "Self-assessment"]},
+    {"day": 14, "focus": "Mastery check", "activities": ["Final review", "Plan next learning steps"]}
+  ]
+}
+
+Include 5-10 resources of mixed types. Create a 7-14 day plan that builds progressively.`
 
     default:
       throw new Error(`Unknown generation type: ${type}`)
@@ -152,7 +261,7 @@ async function generateWithRetry(
     try {
       const message = await anthropic.messages.create({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 1024,
+        max_tokens: 2048,
         messages: [
           {
             role: 'user',
@@ -225,6 +334,12 @@ export async function POST(req: NextRequest) {
       case 'learn_item':
       case 'learn_more':
         validateFn = isValidLearnContent
+        break
+      case 'expand_content':
+        validateFn = isValidExpandedContent
+        break
+      case 'lesson_plan':
+        validateFn = isValidLessonPlan
         break
       default:
         return NextResponse.json(
