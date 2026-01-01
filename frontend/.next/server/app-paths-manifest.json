@@ -1,5 +1,6 @@
 {
   "/api/prefs/route": "app/api/prefs/route.js",
   "/api/learn/route": "app/api/learn/route.js",
-  "/api/saved/route": "app/api/saved/route.js"
+  "/api/saved/route": "app/api/saved/route.js",
+  "/api/generate/route": "app/api/generate/route.js"
 }
