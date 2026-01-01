@@ -33,16 +33,26 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json()
-  const { preferred_topics, depth } = body
+  const { preferred_topics, depth, theme } = body
+
+  const updateData: Record<string, unknown> = {
+    user_id: user.id,
+    updated_at: new Date().toISOString(),
+  }
+
+  if (preferred_topics !== undefined) {
+    updateData.preferred_topics = preferred_topics
+  }
+  if (depth !== undefined) {
+    updateData.depth = depth
+  }
+  if (theme !== undefined) {
+    updateData.theme = theme
+  }
 
   const { data, error } = await supabase
     .from('user_prefs')
-    .upsert({
-      user_id: user.id,
-      preferred_topics,
-      depth,
-      updated_at: new Date().toISOString(),
-    })
+    .upsert(updateData)
     .select()
     .single()
 
