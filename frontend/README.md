@@ -22,13 +22,20 @@ A production-ready MVP web app that delivers short, AI-generated learning cards 
 
 ### 1. Environment Variables
 
-Create a `.env` file in the frontend directory:
+Create TWO env files in the frontend directory:
 
+**`.env`** (public, safe to commit):
 ```env
 NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+```
+
+**`.env.local`** (secret, gitignored - NEVER commit):
+```env
 CLAUDE_API_KEY=your-claude-api-key
 ```
+
+For **Vercel deployment**, add `CLAUDE_API_KEY` as an environment variable in your project settings (Settings → Environment Variables).
 
 ### 2. Supabase Database Setup
 
