@@ -7,13 +7,17 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { LoadingSpinner, TopicCardSkeleton } from '@/components/loading'
-import { ArrowRight, BookOpen, Sparkles, Clock, Send, Settings, Bookmark, LogOut, Moon, Sun } from 'lucide-react'
+import { RotatingHeadline } from '@/components/rotating-headline'
+import { ThemeDropdown } from '@/components/theme-dropdown'
+import { TopicIcon } from '@/components/topic-icon'
+import { MoreHorizontal, BookOpen, Sparkles, Send, Settings, Bookmark, LogOut, ArrowRight } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import type { UserPrefs, TopicOption, ClarifyResponse, LearnItem } from '@/lib/types'
+import { formatDate } from '@/lib/utils'
 
 export default function HomePage() {
   const router = useRouter()
-  const { theme, setTheme } = useTheme()
+  const { setTheme } = useTheme()
   const [user, setUser] = useState<{ id: string; email?: string } | null>(null)
   const [prefs, setPrefs] = useState<UserPrefs | null>(null)
   const [loading, setLoading] = useState(true)
@@ -62,6 +66,11 @@ export default function HomePage() {
       }
 
       setPrefs(prefs)
+      
+      // Apply saved theme preference
+      if (prefs.theme) {
+        setTheme(prefs.theme === 'auto' ? 'system' : prefs.theme)
+      }
       
       // Load topic options
       loadTopicOptions(prefs.preferred_topics, prefs.depth)
@@ -142,6 +151,23 @@ export default function HomePage() {
     setPrefs(null)
     setTopicOptions([])
     setRecentItem(null)
+  }
+
+  async function handleThemeChange(theme: 'light' | 'dark' | 'auto') {
+    // Save to database
+    try {
+      await fetch('/api/prefs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          preferred_topics: prefs?.preferred_topics || [],
+          depth: prefs?.depth || 'concise',
+          theme,
+        }),
+      })
+    } catch (error) {
+      console.error('Error saving theme:', error)
+    }
   }
 
   async function handleTopicSelect(topic: string) {
@@ -398,14 +424,8 @@ export default function HomePage() {
             <BookOpen className="h-6 w-6 text-primary" />
             <span className="font-semibold text-lg">Educel</span>
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            >
-              {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-            </Button>
+          <div className="flex items-center gap-1">
+            <ThemeDropdown onThemeChange={handleThemeChange} />
             <Button variant="ghost" size="icon" onClick={() => router.push('/saved')}>
               <Bookmark className="h-5 w-5" />
             </Button>
@@ -420,9 +440,9 @@ export default function HomePage() {
       </header>
 
       <main className="container py-8 max-w-3xl mx-auto space-y-10">
-        {/* Pick a lane section */}
+        {/* Pick a lane section with rotating headline */}
         <section>
-          <h2 className="text-2xl font-semibold mb-1">Pick a lane</h2>
+          <RotatingHeadline />
           <p className="text-muted-foreground mb-6">Choose a topic to start learning</p>
           
           <div className="grid gap-4">
@@ -440,18 +460,17 @@ export default function HomePage() {
                   onClick={() => handleTopicSelect(option.topic)}
                 >
                   <CardContent className="p-5">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
+                    <div className="flex items-start gap-4">
+                      <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0 group-hover:bg-primary/20 transition-colors">
+                        <TopicIcon topic={option.topic} className="h-5 w-5 text-primary" />
+                      </div>
+                      <div className="flex-1 min-w-0">
                         <h3 className="font-medium text-lg group-hover:text-primary transition-colors">
                           {option.topic}
                         </h3>
                         <p className="text-muted-foreground text-sm mt-1">
                           {option.hook}
                         </p>
-                      </div>
-                      <div className="flex items-center gap-1 text-xs text-muted-foreground ml-4">
-                        <Clock className="h-3 w-3" />
-                        ~1 min
                       </div>
                     </div>
                   </CardContent>
@@ -526,7 +545,7 @@ export default function HomePage() {
           )}
         </section>
 
-        {/* Continue section */}
+        {/* Continue section - Updated with ellipsis icon and date */}
         {recentItem && (
           <section>
             <h2 className="text-xl font-semibold mb-4">Continue where you left off</h2>
@@ -536,10 +555,15 @@ export default function HomePage() {
             >
               <CardContent className="p-5">
                 <div className="flex items-start gap-3">
-                  <ArrowRight className="h-5 w-5 text-muted-foreground mt-0.5" />
-                  <div>
+                  <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
+                    <MoreHorizontal className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                  <div className="flex-1 min-w-0">
                     <h3 className="font-medium">{recentItem.content.title}</h3>
                     <p className="text-sm text-muted-foreground mt-1">{recentItem.topic}</p>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Last opened {formatDate(recentItem.created_at)}
+                    </p>
                   </div>
                 </div>
               </CardContent>
