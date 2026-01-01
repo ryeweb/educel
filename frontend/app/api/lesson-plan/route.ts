@@ -69,26 +69,43 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json()
-  const { learn_item_id, topic, goals, resources, exercises, daily_plan } = body
+  const { learn_item_id, title, topic, content } = body
 
-  const { data, error } = await supabase
+  const planId = uuidv4()
+
+  // Create the lesson plan
+  const { data: plan, error: planError } = await supabase
     .from('lesson_plans')
     .insert({
-      id: uuidv4(),
+      id: planId,
       user_id: user.id,
-      learn_item_id,
+      learn_item_id: learn_item_id || null,
+      title: title || `Lesson Plan: ${topic}`,
       topic,
-      goals,
-      resources,
-      exercises,
-      daily_plan,
+      content,
     })
     .select()
     .single()
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  if (planError) {
+    return NextResponse.json({ error: planError.message }, { status: 500 })
   }
 
-  return NextResponse.json({ plan: data })
+  // Auto-save the lesson plan to saved_items
+  const savedId = uuidv4()
+  const { error: saveError } = await supabase
+    .from('saved_items')
+    .insert({
+      id: savedId,
+      user_id: user.id,
+      item_type: 'lesson_plan',
+      item_id: planId,
+    })
+
+  if (saveError) {
+    console.error('Error auto-saving lesson plan:', saveError.message)
+    // Don't fail the request, just log the error
+  }
+
+  return NextResponse.json({ plan, autoSaved: !saveError })
 }
