@@ -1,15 +1,18 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { NextRequest, NextResponse } from 'next/server'
-import { GenerateRequest, LearnContent, TopicOption, ClarifyResponse, ExpandedContent, LessonPlan } from '@/lib/types'
+import { GenerateRequest, LearnContent, TopicOption, ClarifyResponse, ExpandedContent, LessonPlanContent, getFallbackSources } from '@/lib/types'
 
 const anthropic = new Anthropic({
   apiKey: process.env.CLAUDE_API_KEY,
 })
 
+// Best-effort validation - accepts responses without sources
 function isValidLearnContent(obj: unknown): obj is LearnContent {
   if (typeof obj !== 'object' || obj === null) return false
   const content = obj as Record<string, unknown>
-  return (
+  
+  // Core fields are required
+  const hasCore = (
     typeof content.title === 'string' &&
     typeof content.hook === 'string' &&
     Array.isArray(content.bullets) &&
@@ -18,11 +21,25 @@ function isValidLearnContent(obj: unknown): obj is LearnContent {
     typeof content.example === 'string' &&
     typeof content.micro_action === 'string' &&
     typeof content.quiz_question === 'string' &&
-    typeof content.quiz_answer === 'string' &&
-    Array.isArray(content.sources) &&
-    content.sources.length >= 1 &&
-    content.sources.length <= 3
+    typeof content.quiz_answer === 'string'
   )
+  
+  // Sources are optional - don't fail validation if missing
+  if (content.sources !== undefined) {
+    if (!Array.isArray(content.sources)) return hasCore
+    // Validate source structure if present
+    const validSources = content.sources.every((s: unknown) => {
+      if (typeof s !== 'object' || s === null) return false
+      const source = s as Record<string, unknown>
+      return typeof source.title === 'string' && typeof source.url === 'string'
+    })
+    if (!validSources) {
+      // Clear invalid sources, keep the rest
+      content.sources = []
+    }
+  }
+  
+  return hasCore
 }
 
 function isValidTopicOptions(obj: unknown): obj is { options: TopicOption[] } {
@@ -58,16 +75,16 @@ function isValidExpandedContent(obj: unknown): obj is ExpandedContent {
   )
 }
 
-function isValidLessonPlan(obj: unknown): boolean {
+function isValidLessonPlan(obj: unknown): obj is LessonPlanContent {
   if (typeof obj !== 'object' || obj === null) return false
   const data = obj as Record<string, unknown>
   return (
     Array.isArray(data.goals) &&
     data.goals.length >= 2 &&
     Array.isArray(data.resources) &&
-    data.resources.length >= 5 &&
+    data.resources.length >= 3 &&
     Array.isArray(data.exercises) &&
-    data.exercises.length >= 3 &&
+    data.exercises.length >= 2 &&
     Array.isArray(data.daily_plan) &&
     data.daily_plan.length >= 7
   )
@@ -160,16 +177,11 @@ Respond with ONLY this JSON structure:
   "quiz_question": "A thoughtful question to test understanding",
   "quiz_answer": "Brief, clear answer",
   "sources": [
-    {"title": "Source name or article title", "url": "https://credible-domain.com/relevant-path"},
-    {"title": "Another source", "url": "https://another-credible-site.com/path"}
+    {"title": "Source name", "url": "https://credible-domain.com/path"}
   ]
 }
 
-IMPORTANT for sources:
-- Include 1-3 credible, relevant sources
-- Use real, well-known publications (Harvard Business Review, MIT Sloan, McKinsey, reputable tech blogs, academic institutions)
-- URLs should be plausible paths to real articles (don't make up exact URLs, but use realistic domain/path patterns)
-- Sources should be directly relevant to the topic
+For sources: Try to include 1-2 relevant links from credible publications (HBR, MIT Sloan, reputable sites). If unsure, you may omit the sources array.
 
 Ensure bullets are exactly 3 items. Make the micro_action immediately actionable.`
 
@@ -214,102 +226,90 @@ Respond with ONLY this JSON structure:
   "resources": [
     {"title": "Resource name", "url": "https://credible-site.com/path", "type": "article"},
     {"title": "Book recommendation", "url": "https://amazon.com/book", "type": "book"},
-    {"title": "Video course or talk", "url": "https://youtube.com/watch", "type": "video"},
+    {"title": "Video or talk", "url": "https://youtube.com/watch", "type": "video"},
     {"title": "Online course", "url": "https://coursera.org/course", "type": "course"},
-    {"title": "Useful tool or app", "url": "https://tool-site.com", "type": "tool"}
+    {"title": "Useful tool", "url": "https://tool-site.com", "type": "tool"}
   ],
   "exercises": [
     "Practical exercise 1 - hands-on activity",
     "Practical exercise 2 - reflection or analysis task",
-    "Practical exercise 3 - real-world application",
-    "Practical exercise 4 - peer discussion or teaching exercise"
+    "Practical exercise 3 - real-world application"
   ],
   "daily_plan": [
-    {"day": 1, "focus": "Foundation - understanding core concepts", "activities": ["Read intro material", "Take notes on key terms"]},
-    {"day": 2, "focus": "Deep dive into first principle", "activities": ["Study resource 1", "Complete exercise 1"]},
-    {"day": 3, "focus": "Deep dive into second principle", "activities": ["Watch video content", "Practice application"]},
-    {"day": 4, "focus": "Connecting concepts", "activities": ["Review and connect ideas", "Exercise 2"]},
-    {"day": 5, "focus": "Real-world application", "activities": ["Apply to current project", "Document learnings"]},
-    {"day": 6, "focus": "Advanced concepts", "activities": ["Explore edge cases", "Exercise 3"]},
-    {"day": 7, "focus": "Review and consolidate", "activities": ["Quiz yourself", "Identify gaps"]},
-    {"day": 8, "focus": "Practical project start", "activities": ["Begin mini-project", "Set milestones"]},
-    {"day": 9, "focus": "Project continuation", "activities": ["Work on project", "Seek feedback"]},
-    {"day": 10, "focus": "Expert perspectives", "activities": ["Read advanced material", "Note different viewpoints"]},
-    {"day": 11, "focus": "Teaching to learn", "activities": ["Explain concepts to someone", "Exercise 4"]},
-    {"day": 12, "focus": "Integration", "activities": ["Connect to other knowledge", "Update notes"]},
-    {"day": 13, "focus": "Final project work", "activities": ["Complete project", "Self-assessment"]},
-    {"day": 14, "focus": "Mastery check", "activities": ["Final review", "Plan next learning steps"]}
+    {"day": 1, "focus": "Foundation", "activities": ["Read intro material", "Take notes"]},
+    {"day": 2, "focus": "Deep dive", "activities": ["Study resource 1", "Complete exercise 1"]},
+    {"day": 3, "focus": "Practice", "activities": ["Watch video content", "Practice application"]},
+    {"day": 4, "focus": "Connect", "activities": ["Review and connect ideas", "Exercise 2"]},
+    {"day": 5, "focus": "Apply", "activities": ["Apply to current project", "Document learnings"]},
+    {"day": 6, "focus": "Advanced", "activities": ["Explore edge cases", "Exercise 3"]},
+    {"day": 7, "focus": "Review", "activities": ["Quiz yourself", "Plan next steps"]}
   ]
 }
 
-Include 5-10 resources of mixed types. Create a 7-14 day plan that builds progressively.`
+Include 5-7 resources of mixed types. Create a 7-14 day plan that builds progressively.`
 
     default:
       throw new Error(`Unknown generation type: ${type}`)
   }
 }
 
-async function generateWithRetry(
+// Single Claude call - no retries for sources
+async function generateContent(
   systemPrompt: string,
   userPrompt: string,
   validateFn: (obj: unknown) => boolean,
-  maxRetries = 1
-): Promise<unknown> {
-  let lastError: Error | null = null
+  topic?: string
+): Promise<{ result: unknown; usedFallbackSources: boolean }> {
+  const message = await anthropic.messages.create({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 2048,
+    messages: [{ role: 'user', content: userPrompt }],
+    system: systemPrompt,
+  })
+
+  const textContent = message.content.find(block => block.type === 'text')
+  if (!textContent || textContent.type !== 'text') {
+    throw new Error('No text content in response')
+  }
+
+  // Clean up potential markdown code blocks
+  let jsonStr = textContent.text.trim()
+  if (jsonStr.startsWith('```json')) {
+    jsonStr = jsonStr.slice(7)
+  } else if (jsonStr.startsWith('```')) {
+    jsonStr = jsonStr.slice(3)
+  }
+  if (jsonStr.endsWith('```')) {
+    jsonStr = jsonStr.slice(0, -3)
+  }
+  jsonStr = jsonStr.trim()
+
+  const parsed = JSON.parse(jsonStr)
   
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      const message = await anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 2048,
-        messages: [
-          {
-            role: 'user',
-            content: attempt === 0 
-              ? userPrompt 
-              : `${userPrompt}\n\nIMPORTANT: Your previous response was not valid JSON. Please respond with ONLY the JSON object, no markdown formatting or additional text.`
-          }
-        ],
-        system: systemPrompt,
-      })
+  if (!validateFn(parsed)) {
+    throw new Error('Response does not match expected schema')
+  }
 
-      const textContent = message.content.find(block => block.type === 'text')
-      if (!textContent || textContent.type !== 'text') {
-        throw new Error('No text content in response')
+  // Check if we need fallback sources for learn_item
+  let usedFallbackSources = false
+  if (parsed && typeof parsed === 'object' && 'title' in parsed) {
+    const content = parsed as LearnContent
+    if (!content.sources || content.sources.length === 0) {
+      // Use fallback sources based on topic
+      if (topic) {
+        content.sources = getFallbackSources(topic)
+        usedFallbackSources = true
       }
-
-      // Clean up potential markdown code blocks
-      let jsonStr = textContent.text.trim()
-      if (jsonStr.startsWith('```json')) {
-        jsonStr = jsonStr.slice(7)
-      } else if (jsonStr.startsWith('```')) {
-        jsonStr = jsonStr.slice(3)
-      }
-      if (jsonStr.endsWith('```')) {
-        jsonStr = jsonStr.slice(0, -3)
-      }
-      jsonStr = jsonStr.trim()
-
-      const parsed = JSON.parse(jsonStr)
-      
-      if (validateFn(parsed)) {
-        return parsed
-      }
-      
-      throw new Error('Response does not match expected schema')
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error))
-      console.error(`Attempt ${attempt + 1} failed:`, lastError.message)
     }
   }
 
-  throw lastError || new Error('Generation failed')
+  return { result: parsed, usedFallbackSources }
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body: GenerateRequest = await req.json()
-    const { type, depth } = body
+    const { type, depth, topic, custom_topic } = body
 
     if (!type || !depth) {
       return NextResponse.json(
@@ -348,9 +348,17 @@ export async function POST(req: NextRequest) {
         )
     }
 
-    const result = await generateWithRetry(systemPrompt, userPrompt, validateFn)
+    const { result, usedFallbackSources } = await generateContent(
+      systemPrompt, 
+      userPrompt, 
+      validateFn,
+      topic || custom_topic
+    )
     
-    return NextResponse.json(result)
+    return NextResponse.json({ 
+      ...result as object, 
+      _meta: { usedFallbackSources } 
+    })
   } catch (error) {
     console.error('Generate API error:', error)
     return NextResponse.json(
