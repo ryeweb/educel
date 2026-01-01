@@ -1,8 +1,4 @@
 {
-  "/api/prefs/route": "app/api/prefs/route.js",
-  "/api/learn/route": "app/api/learn/route.js",
-  "/api/saved/route": "app/api/saved/route.js",
-  "/api/generate/route": "app/api/generate/route.js",
-  "/api/auth/login/route": "app/api/auth/login/route.js",
+  "/_not-found/page": "app/_not-found/page.js",
   "/page": "app/page.js"
 }
