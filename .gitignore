@@ -30,8 +30,7 @@ next-env.d.ts
 dist/
 dist
 
-# Environment files (comprehensive coverage)
-
+# Credentials (never commit)
 *token.json*
 *credentials.json*
 
@@ -77,18 +76,15 @@ agenthub/agents/youtube/db
 .cache/
 
 # Mobile development
-android-sdk/ frontend/node_modules/@next/swc-linux-arm64-gnu/next-swc.linux-arm64-gnu.node
-frontend/node_modules/@next/swc-linux-arm64-musl/next-swc.linux-arm64-musl.node
+android-sdk/
+
+# Environment files with secrets (never commit)
+.env.local
+.env*.local
+*.env.local
+
+# Allow .env.example to be committed
+!.env.example
+!**/.env.example
 frontend/node_modules/@next/swc-linux-arm64-gnu/next-swc.linux-arm64-gnu.node
--e 
-# Environment files
-*.env
-*.env.*
--e 
-# Environment files
-*.env
-*.env.*
--e 
-# Environment files
-*.env
-*.env.*
+frontend/node_modules/@next/swc-linux-arm64-musl/next-swc.linux-arm64-musl.node
