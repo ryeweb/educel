@@ -2,7 +2,19 @@
 
 Run these SQL commands in your Supabase SQL Editor (Dashboard → SQL Editor → New Query).
 
-## 1. Create Tables
+---
+
+## For NEW Users (Fresh Setup)
+
+If you're setting up Educel for the first time, run Section A only.
+
+## For EXISTING Users (Already have tables)
+
+If you already ran the original setup and have data, **skip to Section B** (Safe Migration).
+
+---
+
+## Section A: Fresh Setup (New Users Only)
 
 ```sql
 -- Enable UUID extension if not enabled
@@ -28,7 +40,6 @@ CREATE TABLE IF NOT EXISTS learn_items (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Create index for faster queries
 CREATE INDEX IF NOT EXISTS learn_items_user_id_idx ON learn_items(user_id);
 CREATE INDEX IF NOT EXISTS learn_items_created_at_idx ON learn_items(created_at DESC);
 
@@ -41,10 +52,9 @@ CREATE TABLE IF NOT EXISTS saved_items (
   UNIQUE(user_id, learn_item_id)
 );
 
--- Create index for faster queries
 CREATE INDEX IF NOT EXISTS saved_items_user_id_idx ON saved_items(user_id);
 
--- Lesson Plans Table (NEW)
+-- Lesson Plans Table
 CREATE TABLE IF NOT EXISTS lesson_plans (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -58,24 +68,15 @@ CREATE TABLE IF NOT EXISTS lesson_plans (
   UNIQUE(user_id, learn_item_id)
 );
 
--- Create index for lesson plans
 CREATE INDEX IF NOT EXISTS lesson_plans_user_id_idx ON lesson_plans(user_id);
 CREATE INDEX IF NOT EXISTS lesson_plans_learn_item_id_idx ON lesson_plans(learn_item_id);
-```
 
-## 2. Enable Row Level Security (RLS)
-
-```sql
 -- Enable RLS on all tables
 ALTER TABLE user_prefs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE learn_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE saved_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE lesson_plans ENABLE ROW LEVEL SECURITY;
-```
 
-## 3. Create RLS Policies
-
-```sql
 -- User Prefs Policies
 CREATE POLICY "Users can view own prefs" ON user_prefs
   FOR SELECT USING (auth.uid() = user_id);
@@ -114,22 +115,30 @@ CREATE POLICY "Users can delete own lesson plans" ON lesson_plans
   FOR DELETE USING (auth.uid() = user_id);
 ```
 
-## 4. Migration for Existing Users (Safe Updates)
+---
 
-If you already have the tables and need to add the new columns/table:
+## Section B: Safe Migration (Existing Users)
+
+**Run this if you already have the original tables set up.** This will NOT delete any existing data.
 
 ```sql
--- Add theme column to user_prefs if it doesn't exist
+-- 1. Add theme column to user_prefs (if it doesn't exist)
+-- This preserves all existing user data
 DO $$ 
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                 WHERE table_name = 'user_prefs' AND column_name = 'theme') THEN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'user_prefs' AND column_name = 'theme'
+  ) THEN
     ALTER TABLE user_prefs ADD COLUMN theme TEXT NOT NULL DEFAULT 'auto' 
       CHECK (theme IN ('light', 'dark', 'auto'));
+    RAISE NOTICE 'Added theme column to user_prefs';
+  ELSE
+    RAISE NOTICE 'theme column already exists in user_prefs';
   END IF;
 END $$;
 
--- Create lesson_plans table if it doesn't exist (safe to run)
+-- 2. Create lesson_plans table (safe - uses IF NOT EXISTS)
 CREATE TABLE IF NOT EXISTS lesson_plans (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -143,53 +152,80 @@ CREATE TABLE IF NOT EXISTS lesson_plans (
   UNIQUE(user_id, learn_item_id)
 );
 
--- Enable RLS on lesson_plans
+-- 3. Enable RLS on lesson_plans (safe to run multiple times)
 ALTER TABLE lesson_plans ENABLE ROW LEVEL SECURITY;
 
--- Add RLS policies for lesson_plans (safe to run - will skip if exists)
+-- 4. Create indexes (safe - uses IF NOT EXISTS)
+CREATE INDEX IF NOT EXISTS lesson_plans_user_id_idx ON lesson_plans(user_id);
+CREATE INDEX IF NOT EXISTS lesson_plans_learn_item_id_idx ON lesson_plans(learn_item_id);
+
+-- 5. Add RLS policies for lesson_plans (only if they don't exist)
 DO $$ 
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'lesson_plans' AND policyname = 'Users can view own lesson plans') THEN
+  -- Check and create SELECT policy
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE tablename = 'lesson_plans' AND policyname = 'Users can view own lesson plans'
+  ) THEN
     CREATE POLICY "Users can view own lesson plans" ON lesson_plans
       FOR SELECT USING (auth.uid() = user_id);
+    RAISE NOTICE 'Created SELECT policy for lesson_plans';
   END IF;
   
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'lesson_plans' AND policyname = 'Users can insert own lesson plans') THEN
+  -- Check and create INSERT policy
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE tablename = 'lesson_plans' AND policyname = 'Users can insert own lesson plans'
+  ) THEN
     CREATE POLICY "Users can insert own lesson plans" ON lesson_plans
       FOR INSERT WITH CHECK (auth.uid() = user_id);
+    RAISE NOTICE 'Created INSERT policy for lesson_plans';
   END IF;
   
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'lesson_plans' AND policyname = 'Users can delete own lesson plans') THEN
+  -- Check and create DELETE policy
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE tablename = 'lesson_plans' AND policyname = 'Users can delete own lesson plans'
+  ) THEN
     CREATE POLICY "Users can delete own lesson plans" ON lesson_plans
       FOR DELETE USING (auth.uid() = user_id);
+    RAISE NOTICE 'Created DELETE policy for lesson_plans';
   END IF;
 END $$;
 
--- Create indexes if they don't exist
-CREATE INDEX IF NOT EXISTS lesson_plans_user_id_idx ON lesson_plans(user_id);
-CREATE INDEX IF NOT EXISTS lesson_plans_learn_item_id_idx ON lesson_plans(learn_item_id);
+-- Done! Your existing data is preserved.
+SELECT 'Migration complete!' AS status;
 ```
 
-## 5. Configure Email Auth (In Dashboard)
+---
+
+## Configure Email Auth (In Dashboard)
 
 1. Go to **Authentication** → **Providers** → **Email**
 2. Enable **Email OTP** (Magic Link)
 3. Configure email templates as needed
 
-## 6. Environment Variables
+## Environment Variables
 
-Make sure your `.env` file has:
-
+**`.env`** (public, safe to commit):
 ```
 NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-And `.env.local` has (never commit this):
+**`.env.local`** (secret, never commit):
 ```
 CLAUDE_API_KEY=your-claude-api-key
 ```
 
-## Quick Test
+## Quick Verification
 
-After running the SQL, you can test by trying to sign in with your email. You should receive a magic link that logs you in and redirects to onboarding.
+After running the SQL, verify your tables exist:
+
+```sql
+SELECT table_name FROM information_schema.tables 
+WHERE table_schema = 'public' 
+AND table_name IN ('user_prefs', 'learn_items', 'saved_items', 'lesson_plans');
+```
+
+You should see all 4 tables listed.
