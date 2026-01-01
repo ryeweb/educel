@@ -23,6 +23,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true)
   const [topicOptions, setTopicOptions] = useState<TopicOption[]>([])
   const [loadingTopics, setLoadingTopics] = useState(false)
+  const [generatingTopic, setGeneratingTopic] = useState<string | null>(null)
   const [teachInput, setTeachInput] = useState('')
   const [loadingTeach, setLoadingTeach] = useState(false)
   const [clarifyMode, setClarifyMode] = useState<ClarifyResponse | null>(null)
@@ -154,7 +155,6 @@ export default function HomePage() {
   }
 
   async function handleThemeChange(theme: 'light' | 'dark' | 'auto') {
-    // Save to database
     try {
       await fetch('/api/prefs', {
         method: 'POST',
@@ -172,9 +172,9 @@ export default function HomePage() {
 
   async function handleTopicSelect(topic: string) {
     if (!prefs) return
+    setGeneratingTopic(topic)
     
     try {
-      // Generate learn item
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -192,14 +192,16 @@ export default function HomePage() {
         return
       }
 
-      // Save to database
+      // Remove _meta before saving
+      const { _meta, ...cleanContent } = content
+
       const saveRes = await fetch('/api/learn', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           topic,
           source_type: 'topic_choice',
-          content,
+          content: cleanContent,
         }),
       })
       const saveData = await saveRes.json()
@@ -209,13 +211,14 @@ export default function HomePage() {
       }
     } catch (error) {
       console.error('Error:', error)
+    } finally {
+      setGeneratingTopic(null)
     }
   }
 
   async function handleTeachMe() {
     if (!teachInput.trim() || !prefs) return
     
-    // Check if input is too vague (single word or very short)
     const words = teachInput.trim().split(/\s+/)
     if (words.length <= 2) {
       setLoadingTeach(true)
@@ -242,7 +245,6 @@ export default function HomePage() {
       return
     }
 
-    // Direct generation for specific topics
     setLoadingTeach(true)
     try {
       const res = await fetch('/api/generate', {
@@ -262,13 +264,15 @@ export default function HomePage() {
         return
       }
 
+      const { _meta, ...cleanContent } = content
+
       const saveRes = await fetch('/api/learn', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           topic: teachInput,
           source_type: 'teach_me',
-          content,
+          content: cleanContent,
         }),
       })
       const saveData = await saveRes.json()
@@ -308,13 +312,15 @@ export default function HomePage() {
         return
       }
 
+      const { _meta, ...cleanContent } = content
+
       const saveRes = await fetch('/api/learn', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           topic: fullTopic,
           source_type: 'teach_me',
-          content,
+          content: cleanContent,
         }),
       })
       const saveData = await saveRes.json()
@@ -330,7 +336,6 @@ export default function HomePage() {
     }
   }
 
-  // Loading state
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -339,7 +344,6 @@ export default function HomePage() {
     )
   }
 
-  // Not logged in
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
@@ -347,7 +351,7 @@ export default function HomePage() {
           <div className="text-center mb-8">
             <div className="flex items-center justify-center gap-2 mb-4">
               <BookOpen className="h-10 w-10 text-primary" />
-              <h1 className="text-4xl font-bold">Educel</h1>
+              <h1 className="text-4xl font-bold font-[family-name:var(--font-dm-sans)]">Educel</h1>
             </div>
             <p className="text-muted-foreground text-lg">
               Your personal knowledge feed for busy professionals
@@ -414,15 +418,13 @@ export default function HomePage() {
     )
   }
 
-  // Logged in - main app
   return (
     <div className="min-h-screen">
-      {/* Header */}
-      <header className="border-b">
+      <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-10">
         <div className="container flex items-center justify-between h-16">
           <div className="flex items-center gap-2">
             <BookOpen className="h-6 w-6 text-primary" />
-            <span className="font-semibold text-lg">Educel</span>
+            <span className="font-semibold text-lg font-[family-name:var(--font-dm-sans)]">Educel</span>
           </div>
           <div className="flex items-center gap-1">
             <ThemeDropdown onThemeChange={handleThemeChange} />
@@ -440,7 +442,6 @@ export default function HomePage() {
       </header>
 
       <main className="container py-8 max-w-3xl mx-auto space-y-10">
-        {/* Pick a lane section with rotating headline */}
         <section>
           <RotatingHeadline />
           <p className="text-muted-foreground mb-6">Choose a topic to start learning</p>
@@ -456,16 +457,20 @@ export default function HomePage() {
               topicOptions.map((option, i) => (
                 <Card 
                   key={i} 
-                  className="cursor-pointer hover:border-primary/50 transition-colors group"
-                  onClick={() => handleTopicSelect(option.topic)}
+                  className={`card-interactive group ${generatingTopic === option.topic ? 'opacity-70' : ''}`}
+                  onClick={() => !generatingTopic && handleTopicSelect(option.topic)}
                 >
                   <CardContent className="p-5">
                     <div className="flex items-start gap-4">
-                      <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0 group-hover:bg-primary/20 transition-colors">
-                        <TopicIcon topic={option.topic} className="h-5 w-5 text-primary" />
+                      <div className="icon-badge">
+                        {generatingTopic === option.topic ? (
+                          <LoadingSpinner className="h-5 w-5" />
+                        ) : (
+                          <TopicIcon topic={option.topic} className="h-5 w-5 text-primary" />
+                        )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h3 className="font-medium text-lg group-hover:text-primary transition-colors">
+                        <h3 className="font-medium text-lg group-hover:text-primary transition-colors font-[family-name:var(--font-dm-sans)]">
                           {option.topic}
                         </h3>
                         <p className="text-muted-foreground text-sm mt-1">
@@ -491,9 +496,8 @@ export default function HomePage() {
           )}
         </section>
 
-        {/* Teach me section */}
         <section>
-          <h2 className="text-2xl font-semibold mb-1">Teach me about...</h2>
+          <h2 className="text-2xl font-semibold mb-1 font-[family-name:var(--font-dm-sans)]">Teach me about...</h2>
           <p className="text-muted-foreground mb-4">Ask anything specific you want to learn</p>
           
           {clarifyMode ? (
@@ -545,17 +549,16 @@ export default function HomePage() {
           )}
         </section>
 
-        {/* Continue section - Updated with ellipsis icon and date */}
         {recentItem && (
           <section>
-            <h2 className="text-xl font-semibold mb-4">Continue where you left off</h2>
+            <h2 className="text-xl font-semibold mb-4 font-[family-name:var(--font-dm-sans)]">Continue where you left off</h2>
             <Card 
-              className="cursor-pointer hover:border-primary/50 transition-colors"
+              className="card-interactive"
               onClick={() => router.push(`/learn/${recentItem.id}`)}
             >
               <CardContent className="p-5">
                 <div className="flex items-start gap-3">
-                  <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
+                  <div className="icon-badge bg-muted">
                     <MoreHorizontal className="h-5 w-5 text-muted-foreground" />
                   </div>
                   <div className="flex-1 min-w-0">
