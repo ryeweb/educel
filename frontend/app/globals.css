@@ -2,51 +2,110 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 
+  Theme: Warm Sand (Default)
+  A calm, elevated palette with subtle warmth
+  
+  Alternative themes documented below:
+  - Calm Slate Blue
+  - Herbal Green
+*/
+
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
+    /* Warm Sand Theme - Light Mode */
+    --background: 40 33% 98%;           /* Off-white with warmth */
+    --foreground: 30 10% 15%;           /* Warm dark gray */
+    --card: 40 25% 99%;
+    --card-foreground: 30 10% 15%;
+    --popover: 40 25% 99%;
+    --popover-foreground: 30 10% 15%;
+    --primary: 35 45% 42%;              /* Sand/terracotta accent */
+    --primary-foreground: 40 33% 98%;
+    --secondary: 80 15% 92%;            /* Soft olive tint */
+    --secondary-foreground: 30 10% 20%;
+    --muted: 40 20% 94%;
+    --muted-foreground: 30 10% 45%;
+    --accent: 35 40% 88%;               /* Light sand */
+    --accent-foreground: 35 45% 30%;
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 40 20% 88%;
+    --input: 40 20% 88%;
+    --ring: 35 45% 42%;
+    --radius: 0.625rem;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    /* Warm Sand Theme - Dark Mode */
+    --background: 30 15% 8%;            /* Warm dark */
+    --foreground: 40 15% 92%;
+    --card: 30 15% 10%;
+    --card-foreground: 40 15% 92%;
+    --popover: 30 15% 10%;
+    --popover-foreground: 40 15% 92%;
+    --primary: 35 50% 55%;              /* Lighter sand for dark mode */
+    --primary-foreground: 30 15% 8%;
+    --secondary: 80 10% 18%;
+    --secondary-foreground: 40 15% 90%;
+    --muted: 30 12% 15%;
+    --muted-foreground: 40 10% 60%;
+    --accent: 35 25% 20%;
+    --accent-foreground: 35 50% 70%;
+    --destructive: 0 60% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 30 12% 18%;
+    --input: 30 12% 18%;
+    --ring: 35 50% 55%;
   }
+
+  /*
+    Alternative Theme: Calm Slate Blue
+    Uncomment and replace the above to use:
+
+    :root {
+      --background: 210 25% 98%;
+      --foreground: 220 15% 15%;
+      --primary: 215 50% 45%;
+      --primary-foreground: 210 25% 98%;
+      --secondary: 210 20% 94%;
+      --accent: 215 40% 90%;
+      --muted: 210 15% 95%;
+      --muted-foreground: 220 10% 45%;
+    }
+    .dark {
+      --background: 220 20% 8%;
+      --foreground: 210 20% 92%;
+      --primary: 215 55% 55%;
+      --secondary: 220 15% 15%;
+      --accent: 215 30% 20%;
+      --muted: 220 15% 12%;
+    }
+  */
+
+  /*
+    Alternative Theme: Herbal Green
+    Uncomment and replace the above to use:
+
+    :root {
+      --background: 90 20% 98%;
+      --foreground: 100 15% 12%;
+      --primary: 140 35% 40%;
+      --primary-foreground: 90 20% 98%;
+      --secondary: 100 15% 93%;
+      --accent: 130 25% 88%;
+      --muted: 90 15% 94%;
+      --muted-foreground: 100 10% 45%;
+    }
+    .dark {
+      --background: 100 20% 7%;
+      --foreground: 90 15% 92%;
+      --primary: 140 40% 50%;
+      --secondary: 100 15% 14%;
+      --accent: 130 20% 18%;
+      --muted: 100 15% 12%;
+    }
+  */
 }
 
 @layer base {
@@ -56,6 +115,23 @@
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
+  }
+  
+  /* Typography - using Inter as default, DM Sans for headings would require import */
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold tracking-tight;
+  }
+  
+  h1 {
+    @apply text-3xl md:text-4xl;
+  }
+  
+  h2 {
+    @apply text-2xl md:text-3xl;
+  }
+  
+  h3 {
+    @apply text-xl md:text-2xl;
   }
 }
 
@@ -89,6 +165,17 @@
   animation: fade-in 0.3s ease-out forwards;
 }
 
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Loading shimmer */
 .shimmer {
   position: relative;
@@ -110,4 +197,38 @@
     transparent
   );
   animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Icon badge styling for topic cards */
+.icon-badge {
+  @apply h-10 w-10 rounded-lg bg-accent flex items-center justify-center flex-shrink-0 transition-colors;
+}
+
+.icon-badge:hover,
+.group:hover .icon-badge {
+  @apply bg-primary/20;
+}
+
+.icon-badge svg {
+  @apply h-5 w-5 text-primary;
+}
+
+/* Card hover effects */
+.card-interactive {
+  @apply cursor-pointer transition-all duration-200;
+}
+
+.card-interactive:hover {
+  @apply border-primary/40 shadow-sm;
+}
+
+/* Selected state for tiles */
+.tile-selected {
+  @apply border-primary bg-accent/30;
 }
