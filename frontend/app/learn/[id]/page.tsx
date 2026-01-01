@@ -9,7 +9,7 @@ import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { LoadingSpinner } from '@/components/loading'
-import type { LearnItem, LearnContent, TopicOption, UserPrefs, ExpandedContent, LessonPlan } from '@/lib/types'
+import type { LearnItem, LearnContent, TopicOption, UserPrefs, ExpandedContent, LessonPlan, LessonPlanContent } from '@/lib/types'
 import { 
   ArrowLeft, 
   BookOpen, 
@@ -17,6 +17,7 @@ import {
   BookmarkCheck, 
   ChevronRight,
   ChevronLeft,
+  ChevronDown,
   Lightbulb,
   Compass,
   Check,
@@ -40,12 +41,12 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
   const [allItems, setAllItems] = useState<LearnItem[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
   
-  // Expanded content state
+  // Expanded content state - cached
   const [expandedContent, setExpandedContent] = useState<ExpandedContent | null>(null)
   const [loadingExpand, setLoadingExpand] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
   
-  // Lesson plan state
+  // Lesson plan state - cached
   const [lessonPlan, setLessonPlan] = useState<LessonPlan | null>(null)
   const [loadingLessonPlan, setLoadingLessonPlan] = useState(false)
   const [showLessonPlan, setShowLessonPlan] = useState(false)
@@ -79,14 +80,25 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
 
   async function loadItem() {
     setLoading(true)
-    setIsExpanded(false)
-    setExpandedContent(null)
     setShowLessonPlan(false)
+    setAdjacentOptions(null)
+    setShowAnswer(false)
+    
     try {
       const res = await fetch(`/api/learn?id=${resolvedParams.id}`)
       const data = await res.json()
       if (data.item) {
         setItem(data.item)
+        
+        // Check for cached expanded content
+        if (data.item.expanded_content) {
+          setExpandedContent(data.item.expanded_content)
+          setIsExpanded(true)
+        } else {
+          setExpandedContent(null)
+          setIsExpanded(false)
+        }
+        
         // Check for existing lesson plan
         checkExistingLessonPlan(resolvedParams.id)
       }
@@ -125,10 +137,10 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
 
   async function checkIfSaved() {
     try {
-      const res = await fetch('/api/saved')
+      const res = await fetch('/api/saved?item_type=learning')
       const data = await res.json()
       if (data.items) {
-        const saved = data.items.some((s: { learn_item_id: string }) => s.learn_item_id === resolvedParams.id)
+        const saved = data.items.some((s: { item_id: string }) => s.item_id === resolvedParams.id)
         setIsSaved(saved)
       }
     } catch (error) {
@@ -154,13 +166,13 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
     setSavingBookmark(true)
     try {
       if (isSaved) {
-        await fetch(`/api/saved?learn_item_id=${resolvedParams.id}`, { method: 'DELETE' })
+        await fetch(`/api/saved?item_type=learning&item_id=${resolvedParams.id}`, { method: 'DELETE' })
         setIsSaved(false)
       } else {
         await fetch('/api/saved', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ learn_item_id: resolvedParams.id }),
+          body: JSON.stringify({ item_type: 'learning', item_id: resolvedParams.id }),
         })
         setIsSaved(true)
       }
@@ -208,7 +220,20 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
         return
       }
 
-      setExpandedContent(data)
+      // Remove _meta if present
+      const { _meta, ...cleanData } = data
+
+      // Save expanded content to learn_item for caching
+      await fetch('/api/learn', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: item.id,
+          expanded_content: cleanData,
+        }),
+      })
+
+      setExpandedContent(cleanData)
       setIsExpanded(true)
     } catch (error) {
       console.error('Error:', error)
@@ -218,7 +243,7 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
   }
 
   async function handleCreateLessonPlan() {
-    if (!prefs || !item) return
+    if (!prefs || !item || lessonPlan) return
     setLoadingLessonPlan(true)
     
     try {
@@ -240,14 +265,18 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
         return
       }
 
-      // Save the lesson plan
+      // Remove _meta if present
+      const { _meta, ...cleanPlanData } = planData
+
+      // Save the lesson plan (auto-saves to saved_items)
       const saveRes = await fetch('/api/lesson-plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           learn_item_id: item.id,
+          title: `Lesson Plan: ${item.content.title}`,
           topic: item.topic,
-          ...planData,
+          content: cleanPlanData,
         }),
       })
       const saveData = await saveRes.json()
@@ -312,13 +341,15 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
         return
       }
 
+      const { _meta, ...cleanContent } = content
+
       const saveRes = await fetch('/api/learn', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           topic,
           source_type: 'adjacent',
-          content,
+          content: cleanContent,
         }),
       })
       const saveData = await saveRes.json()
@@ -357,11 +388,12 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
   }
 
   const content = item.content as LearnContent
+  const planContent = lessonPlan?.content as LessonPlanContent | undefined
 
   return (
     <div className="min-h-screen">
       {/* Header */}
-      <header className="border-b">
+      <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-10">
         <div className="container flex items-center justify-between h-14">
           <Button variant="ghost" size="sm" onClick={() => router.push('/')}>
             <ArrowLeft className="h-4 w-4 mr-2" />
@@ -415,7 +447,7 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
         <Card className="mb-6">
           <CardContent className="p-6 md:p-8">
             {/* Title & Hook */}
-            <h1 className="text-2xl md:text-3xl font-bold mb-3">{content.title}</h1>
+            <h1 className="text-2xl md:text-3xl font-bold mb-3 font-[family-name:var(--font-dm-sans)]">{content.title}</h1>
             <p className="text-lg text-muted-foreground mb-6">{content.hook}</p>
 
             <Separator className="my-6" />
@@ -424,7 +456,7 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
             <div className="space-y-4 mb-6">
               {content.bullets.map((bullet, i) => (
                 <div key={i} className="flex items-start gap-3">
-                  <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <div className="h-6 w-6 rounded-full bg-accent flex items-center justify-center flex-shrink-0 mt-0.5">
                     <Check className="h-3 w-3 text-primary" />
                   </div>
                   <p>{bullet}</p>
@@ -437,24 +469,24 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
             {/* Example */}
             <div className="bg-muted/50 rounded-lg p-4 mb-6">
               <h3 className="font-medium mb-2 flex items-center gap-2">
-                <Lightbulb className="h-4 w-4" />
+                <Lightbulb className="h-4 w-4 text-primary" />
                 Example
               </h3>
               <p className="text-sm">{content.example}</p>
             </div>
 
             {/* Micro-action */}
-            <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 mb-6">
+            <div className="bg-accent/50 border border-primary/20 rounded-lg p-4 mb-6">
               <h3 className="font-medium mb-2">Try this today</h3>
               <p className="text-sm">{content.micro_action}</p>
             </div>
 
-            {/* Sources */}
+            {/* Sources - only show if available */}
             {content.sources && content.sources.length > 0 && (
               <div className="border-t pt-6">
                 <h3 className="font-medium mb-3 flex items-center gap-2 text-sm">
                   <LinkIcon className="h-4 w-4" />
-                  Sources
+                  Suggested starting points
                 </h3>
                 <div className="space-y-2">
                   {content.sources.map((source, i) => (
@@ -473,10 +505,13 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
               </div>
             )}
 
-            {/* Expanded Content Section */}
+            {/* Expanded Content Section - persisted */}
             {isExpanded && expandedContent && (
-              <div className="border-t pt-6 mt-6">
-                <h3 className="font-semibold text-lg mb-4">Deep Dive</h3>
+              <div className="border-t pt-6 mt-6 animate-in">
+                <h3 className="font-semibold text-lg mb-4 flex items-center gap-2 font-[family-name:var(--font-dm-sans)]">
+                  <ChevronDown className="h-5 w-5 text-primary" />
+                  Deep Dive
+                </h3>
                 <div className="space-y-4 text-sm leading-relaxed">
                   {expandedContent.paragraphs.map((para, i) => (
                     <p key={i}>{para}</p>
@@ -504,9 +539,7 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
         <Card className="mb-6">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Label htmlFor="quiz-toggle">Quiz me</Label>
-              </div>
+              <Label htmlFor="quiz-toggle">Quiz me</Label>
               <Switch 
                 id="quiz-toggle" 
                 checked={showQuiz} 
@@ -515,7 +548,7 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
             </div>
             
             {showQuiz && (
-              <div className="mt-4 pt-4 border-t">
+              <div className="mt-4 pt-4 border-t animate-in">
                 <p className="font-medium mb-3">{content.quiz_question}</p>
                 {showAnswer ? (
                   <div className="bg-muted/50 rounded-lg p-3">
@@ -535,20 +568,23 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
           </CardContent>
         </Card>
 
-        {/* Lesson Plan Display */}
-        {showLessonPlan && lessonPlan && (
-          <Card className="mb-6">
+        {/* Lesson Plan Display - persisted */}
+        {showLessonPlan && lessonPlan && planContent && (
+          <Card className="mb-6 animate-in">
             <CardContent className="p-6">
               <div className="flex items-center gap-2 mb-4">
                 <GraduationCap className="h-5 w-5 text-primary" />
-                <h3 className="font-semibold text-lg">Your Lesson Plan</h3>
+                <h3 className="font-semibold text-lg font-[family-name:var(--font-dm-sans)]">Your Lesson Plan</h3>
+                <span className="text-xs bg-accent text-accent-foreground px-2 py-0.5 rounded-full ml-auto">
+                  Auto-saved
+                </span>
               </div>
               
               {/* Goals */}
               <div className="mb-6">
                 <h4 className="font-medium mb-2">Learning Goals</h4>
                 <ul className="space-y-2">
-                  {lessonPlan.goals.map((goal, i) => (
+                  {planContent.goals.map((goal, i) => (
                     <li key={i} className="flex items-start gap-2 text-sm">
                       <span className="text-primary font-medium">{i + 1}.</span>
                       {goal}
@@ -559,9 +595,9 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
 
               {/* Resources */}
               <div className="mb-6">
-                <h4 className="font-medium mb-2">Resources ({lessonPlan.resources.length})</h4>
+                <h4 className="font-medium mb-2">Resources ({planContent.resources.length})</h4>
                 <div className="space-y-2">
-                  {lessonPlan.resources.slice(0, 5).map((resource, i) => (
+                  {planContent.resources.slice(0, 5).map((resource, i) => (
                     <a
                       key={i}
                       href={resource.url}
@@ -581,7 +617,7 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
               <div className="mb-6">
                 <h4 className="font-medium mb-2">Exercises</h4>
                 <ul className="space-y-2">
-                  {lessonPlan.exercises.map((exercise, i) => (
+                  {planContent.exercises.map((exercise, i) => (
                     <li key={i} className="flex items-start gap-2 text-sm">
                       <Check className="h-4 w-4 text-muted-foreground mt-0.5" />
                       {exercise}
@@ -592,17 +628,17 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
 
               {/* Daily Plan Preview */}
               <div>
-                <h4 className="font-medium mb-2">{lessonPlan.daily_plan.length}-Day Plan</h4>
+                <h4 className="font-medium mb-2">{planContent.daily_plan.length}-Day Plan</h4>
                 <div className="grid gap-2">
-                  {lessonPlan.daily_plan.slice(0, 7).map((day, i) => (
+                  {planContent.daily_plan.slice(0, 7).map((day, i) => (
                     <div key={i} className="flex items-start gap-3 text-sm p-2 rounded bg-muted/30">
                       <span className="font-medium text-primary w-12">Day {day.day}</span>
                       <span className="text-muted-foreground">{day.focus}</span>
                     </div>
                   ))}
-                  {lessonPlan.daily_plan.length > 7 && (
+                  {planContent.daily_plan.length > 7 && (
                     <p className="text-xs text-muted-foreground">
-                      + {lessonPlan.daily_plan.length - 7} more days...
+                      + {planContent.daily_plan.length - 7} more days...
                     </p>
                   )}
                 </div>
