@@ -1,70 +1,92 @@
-# Getting Started with Create React App
+# Educel - Personal Knowledge Feed
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A production-ready MVP web app that delivers short, AI-generated learning cards for knowledge workers and founders.
 
-## Available Scripts
+## Features
 
-In the project directory, you can run:
+- **Pick a Lane**: 3 AI-generated topic cards based on your preferences
+- **Teach Me About**: Ask anything specific, with smart clarifying questions for broad topics
+- **Learn Cards**: Scannable format with title, hook, bullets, example, and micro-action
+- **Quiz Mode**: Test your understanding with built-in questions
+- **Save & Continue**: Bookmark items and continue where you left off
+- **Explore Adjacent**: Discover related topics from any learn card
 
-### `npm start`
+## Tech Stack
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+- **Next.js 14** (App Router, TypeScript)
+- **Supabase** (Auth + Postgres with RLS)
+- **Claude AI** (Claude Sonnet 4 for content generation)
+- **Tailwind CSS** + shadcn/ui
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+## Setup
 
-### `npm test`
+### 1. Environment Variables
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+Create a `.env` file in the frontend directory:
 
-### `npm run build`
+```env
+NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+CLAUDE_API_KEY=your-claude-api-key
+```
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+### 2. Supabase Database Setup
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+**IMPORTANT**: You must run the SQL migrations in your Supabase dashboard.
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+1. Go to your Supabase project dashboard
+2. Navigate to **SQL Editor** → **New Query**
+3. Copy and run all the SQL from `SUPABASE_SETUP.md`
 
-### `npm run eject`
+This creates:
+- `user_prefs` table (user preferences)
+- `learn_items` table (generated learning content)
+- `saved_items` table (bookmarked items)
+- Row Level Security policies
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+### 3. Enable Email Auth
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+1. In Supabase Dashboard, go to **Authentication** → **Providers**
+2. Enable **Email** provider
+3. Enable "Magic Link" / OTP login
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+### 4. Run Locally
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+```bash
+cd frontend
+yarn install
+yarn dev
+```
 
-## Learn More
+## Pages
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+| Route | Description |
+|-------|-------------|
+| `/` | Home - Topic picks, Teach me input, Continue section |
+| `/onboarding` | First-time setup - Select topics and depth |
+| `/learn/[id]` | View a learning card with actions |
+| `/saved` | View saved items |
+| `/settings` | Update preferences |
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+## API Routes
 
-### Code Splitting
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/api/generate` | POST | Generate AI content (topic options, learn items, etc.) |
+| `/api/auth/login` | POST | Send magic link email |
+| `/api/auth/logout` | POST | Sign out |
+| `/api/prefs` | GET/POST | User preferences |
+| `/api/learn` | GET/POST | Learning items |
+| `/api/saved` | GET/POST/DELETE | Saved items |
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+## Deployment
 
-### Analyzing the Bundle Size
+Deploy to Vercel:
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+1. Connect your repository
+2. Add environment variables in Vercel dashboard
+3. Deploy
 
-### Making a Progressive Web App
+## License
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+MIT
