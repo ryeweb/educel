@@ -2,19 +2,19 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { LoadingSpinner } from '@/components/loading'
 import { formatDate } from '@/lib/utils'
-import type { SavedItem } from '@/lib/types'
-import { ArrowLeft, BookOpen, Bookmark, Trash2 } from 'lucide-react'
+import type { SavedItem, LearnItem, LessonPlan } from '@/lib/types'
+import { ArrowLeft, BookOpen, Bookmark, GraduationCap, Trash2 } from 'lucide-react'
 
 export default function SavedPage() {
   const router = useRouter()
   const [items, setItems] = useState<SavedItem[]>([])
   const [loading, setLoading] = useState(true)
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<'all' | 'learning' | 'lesson_plan'>('all')
 
   useEffect(() => {
     loadSavedItems()
@@ -34,17 +34,25 @@ export default function SavedPage() {
     }
   }
 
-  async function handleDelete(learnItemId: string) {
-    setDeleting(learnItemId)
+  async function handleDelete(itemId: string, itemType: 'learning' | 'lesson_plan') {
+    setDeleting(itemId)
     try {
-      await fetch(`/api/saved?learn_item_id=${learnItemId}`, { method: 'DELETE' })
-      setItems(prev => prev.filter(item => item.learn_item_id !== learnItemId))
+      await fetch(`/api/saved?item_type=${itemType}&item_id=${itemId}`, { method: 'DELETE' })
+      setItems(prev => prev.filter(item => !(item.item_id === itemId && item.item_type === itemType)))
     } catch (error) {
       console.error('Error deleting:', error)
     } finally {
       setDeleting(null)
     }
   }
+
+  const filteredItems = items.filter(item => {
+    if (activeTab === 'all') return true
+    return item.item_type === activeTab
+  })
+
+  const learningCount = items.filter(i => i.item_type === 'learning').length
+  const lessonPlanCount = items.filter(i => i.item_type === 'lesson_plan').length
 
   if (loading) {
     return (
@@ -57,7 +65,7 @@ export default function SavedPage() {
   return (
     <div className="min-h-screen">
       {/* Header */}
-      <header className="border-b">
+      <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-10">
         <div className="container flex items-center justify-between h-14">
           <Button variant="ghost" size="sm" onClick={() => router.push('/')}>
             <ArrowLeft className="h-4 w-4 mr-2" />
@@ -72,16 +80,55 @@ export default function SavedPage() {
       </header>
 
       <main className="container py-8 max-w-2xl mx-auto">
-        <h1 className="text-2xl font-bold mb-6">Saved Items</h1>
+        <h1 className="text-2xl font-bold mb-6 font-[family-name:var(--font-dm-sans)]">Saved Items</h1>
 
-        {items.length === 0 ? (
+        {/* Tabs */}
+        <div className="flex gap-2 mb-6">
+          <Button 
+            variant={activeTab === 'all' ? 'default' : 'outline'} 
+            size="sm"
+            onClick={() => setActiveTab('all')}
+          >
+            All ({items.length})
+          </Button>
+          <Button 
+            variant={activeTab === 'learning' ? 'default' : 'outline'} 
+            size="sm"
+            onClick={() => setActiveTab('learning')}
+          >
+            <BookOpen className="h-4 w-4 mr-1" />
+            Learnings ({learningCount})
+          </Button>
+          <Button 
+            variant={activeTab === 'lesson_plan' ? 'default' : 'outline'} 
+            size="sm"
+            onClick={() => setActiveTab('lesson_plan')}
+          >
+            <GraduationCap className="h-4 w-4 mr-1" />
+            Lesson Plans ({lessonPlanCount})
+          </Button>
+        </div>
+
+        {filteredItems.length === 0 ? (
           <Card>
             <CardContent className="p-8 text-center">
-              <Bookmark className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <h3 className="font-medium mb-2">No saved items yet</h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                Bookmark learning cards to revisit them later
-              </p>
+              {activeTab === 'lesson_plan' ? (
+                <>
+                  <GraduationCap className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <h3 className="font-medium mb-2">No lesson plans yet</h3>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Create a lesson plan from any learning card to see it here
+                  </p>
+                </>
+              ) : (
+                <>
+                  <Bookmark className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <h3 className="font-medium mb-2">No saved items yet</h3>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Bookmark learning cards to revisit them later
+                  </p>
+                </>
+              )}
               <Button onClick={() => router.push('/')}>
                 Start Learning
               </Button>
@@ -89,46 +136,78 @@ export default function SavedPage() {
           </Card>
         ) : (
           <div className="space-y-3">
-            {items.map(item => (
-              <Card 
-                key={item.id} 
-                className="cursor-pointer hover:border-primary/50 transition-colors"
-              >
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div 
-                      className="flex-1"
-                      onClick={() => router.push(`/learn/${item.learn_item_id}`)}
-                    >
-                      <h3 className="font-medium">
-                        {item.learn_item?.content?.title || 'Untitled'}
-                      </h3>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        {item.learn_item?.topic}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-2">
-                        Saved {formatDate(item.created_at)}
-                      </p>
+            {filteredItems.map(item => {
+              const isLearning = item.item_type === 'learning'
+              const learnItem = item.learn_item as LearnItem | undefined
+              const lessonPlan = item.lesson_plan as LessonPlan | undefined
+              
+              return (
+                <Card 
+                  key={item.id} 
+                  className="card-interactive"
+                >
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div 
+                        className="flex-1 flex items-start gap-3 cursor-pointer"
+                        onClick={() => {
+                          if (isLearning && learnItem) {
+                            router.push(`/learn/${learnItem.id}`)
+                          } else if (lessonPlan) {
+                            // For now, navigate to the linked learn item
+                            if (lessonPlan.learn_item_id) {
+                              router.push(`/learn/${lessonPlan.learn_item_id}`)
+                            }
+                          }
+                        }}
+                      >
+                        <div className={`icon-badge ${isLearning ? '' : 'bg-accent'}`}>
+                          {isLearning ? (
+                            <BookOpen className="h-4 w-4 text-primary" />
+                          ) : (
+                            <GraduationCap className="h-4 w-4 text-primary" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-medium truncate">
+                              {isLearning 
+                                ? learnItem?.content?.title || 'Untitled'
+                                : lessonPlan?.title || 'Untitled Plan'
+                              }
+                            </h3>
+                            <span className="text-xs bg-muted px-2 py-0.5 rounded flex-shrink-0">
+                              {isLearning ? 'Learning' : 'Lesson Plan'}
+                            </span>
+                          </div>
+                          <p className="text-sm text-muted-foreground mt-1 truncate">
+                            {isLearning ? learnItem?.topic : lessonPlan?.topic}
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-2">
+                            Saved {formatDate(item.created_at)}
+                          </p>
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleDelete(item.item_id, item.item_type)
+                        }}
+                        disabled={deleting === item.item_id}
+                      >
+                        {deleting === item.item_id ? (
+                          <LoadingSpinner className="h-4 w-4" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </Button>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleDelete(item.learn_item_id)
-                      }}
-                      disabled={deleting === item.learn_item_id}
-                    >
-                      {deleting === item.learn_item_id ? (
-                        <LoadingSpinner className="h-4 w-4" />
-                      ) : (
-                        <Trash2 className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                  </CardContent>
+                </Card>
+              )
+            })}
           </div>
         )}
       </main>
