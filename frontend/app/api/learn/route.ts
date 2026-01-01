@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextRequest, NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
+import { calculateExpiresAt } from '@/lib/types'
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient()
@@ -56,6 +57,9 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   const { topic, source_type, content } = body
 
+  // Set expiration for 30 days (cleared if saved)
+  const expires_at = calculateExpiresAt()
+
   const { data, error } = await supabase
     .from('learn_items')
     .insert({
@@ -64,7 +68,42 @@ export async function POST(req: NextRequest) {
       topic,
       source_type,
       content,
+      expires_at,
     })
+    .select()
+    .single()
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  return NextResponse.json({ item: data })
+}
+
+export async function PATCH(req: NextRequest) {
+  const supabase = await createClient()
+  
+  const { data: { user } } = await supabase.auth.getUser()
+  
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const body = await req.json()
+  const { id, expanded_content } = body
+
+  if (!id) {
+    return NextResponse.json({ error: 'Missing item id' }, { status: 400 })
+  }
+
+  const { data, error } = await supabase
+    .from('learn_items')
+    .update({
+      expanded_content,
+      expanded_created_at: new Date().toISOString(),
+    })
+    .eq('id', id)
+    .eq('user_id', user.id)
     .select()
     .single()
 
