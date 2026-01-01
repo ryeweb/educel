@@ -22,20 +22,32 @@ A production-ready MVP web app that delivers short, AI-generated learning cards 
 
 ### 1. Environment Variables
 
-Create TWO env files in the frontend directory:
+Copy the example file and fill in your values:
 
-**`.env`** (public, safe to commit):
-```env
-NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+```bash
+cp .env.example .env.local
 ```
 
-**`.env.local`** (secret, gitignored - NEVER commit):
-```env
-CLAUDE_API_KEY=your-claude-api-key
-```
+#### Public Keys (safe to commit in `.env`)
 
-For **Vercel deployment**, add `CLAUDE_API_KEY` as an environment variable in your project settings (Settings → Environment Variables).
+| Variable | Description | Where to Get |
+|----------|-------------|--------------|
+| `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL | Supabase Dashboard → Settings → API |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anonymous/public key | Supabase Dashboard → Settings → API |
+
+These are **public** keys designed to be exposed in client-side code. Supabase uses Row Level Security (RLS) to protect data.
+
+#### Secret Keys (NEVER commit - use `.env.local`)
+
+| Variable | Description | Where to Get |
+|----------|-------------|--------------|
+| `CLAUDE_API_KEY` | Anthropic API key | [console.anthropic.com](https://console.anthropic.com/) |
+
+⚠️ **IMPORTANT**: The Claude API key is a **secret** and must NEVER be committed to git.
+
+- **Local development**: Add to `.env.local` (gitignored)
+- **Vercel deployment**: Add via Settings → Environment Variables
+- **Other platforms**: Use their secure environment variable system
 
 ### 2. Supabase Database Setup
 
@@ -88,11 +100,21 @@ yarn dev
 
 ## Deployment
 
-Deploy to Vercel:
+### Vercel
 
 1. Connect your repository
-2. Add environment variables in Vercel dashboard
+2. Add environment variables:
+   - `NEXT_PUBLIC_SUPABASE_URL` (can also be in repo)
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY` (can also be in repo)
+   - `CLAUDE_API_KEY` (**must** be added as secret env var)
 3. Deploy
+
+## Security Notes
+
+- Supabase `anon` key is **public by design** - it's meant to be in client code
+- All data protection is handled by Row Level Security (RLS) policies
+- Claude API key is **private** and only used server-side in `/api/generate`
+- Never commit `.env.local` or any file containing `CLAUDE_API_KEY`
 
 ## License
 
