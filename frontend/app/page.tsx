@@ -120,9 +120,32 @@ export default function HomePage() {
     }
   }
 
-  async function loadTopicOptions(preferred_topics: string[], depth: 'concise' | 'deeper') {
+  async function loadTopicOptions(preferred_topics: string[], depth: 'concise' | 'deeper', forceRefresh = false) {
     setLoadingTopics(true)
     try {
+      // Check sessionStorage for cached topics (10 min TTL)
+      if (!forceRefresh) {
+        try {
+          const cachedData = sessionStorage.getItem('topicOptions')
+          if (cachedData) {
+            const { options, timestamp, sessionId: cachedSessionId } = JSON.parse(cachedData)
+            const tenMinutesAgo = Date.now() - 10 * 60 * 1000
+
+            if (timestamp > tenMinutesAgo && options?.length === 3) {
+              console.log('Using client-side cached topics')
+              setTopicOptions(options)
+              setSessionId(cachedSessionId)
+              setLoadingTopics(false)
+              return
+            }
+          }
+        } catch (e) {
+          console.error('Error reading topic cache:', e)
+        }
+      }
+
+      // Fetch new topics from API
+      console.log('Fetching new topics from API')
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -138,8 +161,19 @@ export default function HomePage() {
         setTopicOptions(data.options)
 
         // Store session_id from response if provided
-        if (data._meta?.session_id) {
-          setSessionId(data._meta.session_id)
+        const newSessionId = data._meta?.session_id || generateSessionId()
+        setSessionId(newSessionId)
+
+        // Cache in sessionStorage
+        try {
+          sessionStorage.setItem('topicOptions', JSON.stringify({
+            options: data.options,
+            timestamp: Date.now(),
+            sessionId: newSessionId,
+          }))
+          console.log('Cached topics in sessionStorage')
+        } catch (e) {
+          console.error('Error caching topics:', e)
         }
       }
     } catch (error) {
@@ -594,10 +628,10 @@ export default function HomePage() {
           </div>
 
           {!loadingTopics && topicOptions.length > 0 && (
-            <Button 
-              variant="ghost" 
-              className="mt-4" 
-              onClick={() => prefs && loadTopicOptions(prefs.preferred_topics, prefs.depth)}
+            <Button
+              variant="ghost"
+              className="mt-4"
+              onClick={() => prefs && loadTopicOptions(prefs.preferred_topics, prefs.depth, true)}
             >
               <Sparkles className="h-4 w-4 mr-2" />
               Refresh suggestions
