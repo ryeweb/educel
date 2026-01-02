@@ -10,6 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { LoadingSpinner } from '@/components/loading'
+import { NavMenu } from '@/components/nav-menu'
 import { CURATED_TOPICS } from '@/lib/types'
 import type { UserPrefs } from '@/lib/types'
 import { ArrowLeft, Settings, Plus, X, Save } from 'lucide-react'
@@ -21,6 +22,7 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
+  const [userEmail, setUserEmail] = useState<string | undefined>(undefined)
 
   // Form state
   const [selectedTopics, setSelectedTopics] = useState<string[]>([])
@@ -28,9 +30,17 @@ export default function SettingsPage() {
   const [newCustomTopic, setNewCustomTopic] = useState('')
   const [depth, setDepth] = useState<'concise' | 'deeper'>('concise')
 
+  const supabase = createClient()
+
   useEffect(() => {
     loadPrefs()
+    loadUser()
   }, [])
+
+  async function loadUser() {
+    const { data: { user } } = await supabase.auth.getUser()
+    setUserEmail(user?.email)
+  }
 
   async function loadPrefs() {
     try {
@@ -146,7 +156,7 @@ export default function SettingsPage() {
             <Settings className="h-5 w-5 text-primary" />
             <span className="font-medium">Settings</span>
           </div>
-          <div className="w-20" />
+          <NavMenu userEmail={userEmail} />
         </div>
       </header>
 

@@ -1,34 +1,42 @@
 /**
- * Simple in-memory rate limiter for MVP
- * For production with multiple servers, upgrade to Redis/Upstash
+ * Distributed rate limiter using Upstash Redis
+ * Works across multiple server instances (Vercel serverless functions)
  */
 
+import { Redis } from '@upstash/redis'
+import { Ratelimit } from '@upstash/ratelimit'
+
+// Initialize Redis client
+// Falls back to in-memory for development if credentials not provided
+let redis: Redis | null = null
+
+if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+  redis = new Redis({
+    url: process.env.UPSTASH_REDIS_REST_URL,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN,
+  })
+}
+
+// Fallback in-memory rate limiter for development
 interface RateLimitEntry {
   count: number
   resetAt: number
 }
 
-class RateLimiter {
+class InMemoryRateLimiter {
   private limits: Map<string, RateLimitEntry> = new Map()
   private readonly maxRequests: number
   private readonly windowMs: number
-  private cleanupInterval: NodeJS.Timeout | null = null
 
   constructor(maxRequests: number, windowMs: number) {
     this.maxRequests = maxRequests
     this.windowMs = windowMs
-
-    // Cleanup expired entries every 5 minutes
-    this.cleanupInterval = setInterval(() => {
-      this.cleanup()
-    }, 5 * 60 * 1000)
   }
 
   async check(identifier: string): Promise<{ success: boolean; limit: number; remaining: number; resetAt: number }> {
     const now = Date.now()
     const entry = this.limits.get(identifier)
 
-    // No previous requests or window expired
     if (!entry || now > entry.resetAt) {
       const resetAt = now + this.windowMs
       this.limits.set(identifier, { count: 1, resetAt })
@@ -40,7 +48,6 @@ class RateLimiter {
       }
     }
 
-    // Within rate limit
     if (entry.count < this.maxRequests) {
       entry.count++
       return {
@@ -51,7 +58,6 @@ class RateLimiter {
       }
     }
 
-    // Rate limit exceeded
     return {
       success: false,
       limit: this.maxRequests,
@@ -59,26 +65,70 @@ class RateLimiter {
       resetAt: entry.resetAt
     }
   }
-
-  private cleanup() {
-    const now = Date.now()
-    for (const [key, entry] of this.limits.entries()) {
-      if (now > entry.resetAt) {
-        this.limits.delete(key)
-      }
-    }
-  }
-
-  destroy() {
-    if (this.cleanupInterval) {
-      clearInterval(this.cleanupInterval)
-    }
-  }
 }
 
-// Rate limiters for different endpoints
+// Create rate limiters based on whether Redis is available
 // Claude API: 20 requests per hour per user (conservative for cost control)
-export const claudeRateLimiter = new RateLimiter(20, 60 * 60 * 1000)
+const upstashClaudeRateLimiter = redis
+  ? new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(20, '1 h'),
+      analytics: true,
+      prefix: 'ratelimit:claude',
+    })
+  : null
+
+const inMemoryClaudeRateLimiter = new InMemoryRateLimiter(20, 60 * 60 * 1000)
+
+export const claudeRateLimiter = {
+  check: async (identifier: string) => {
+    if (upstashClaudeRateLimiter) {
+      const result = await upstashClaudeRateLimiter.limit(identifier)
+      return {
+        success: result.success,
+        limit: result.limit,
+        remaining: result.remaining,
+        resetAt: result.reset, // Upstash uses 'reset' (timestamp in ms)
+      }
+    }
+    return inMemoryClaudeRateLimiter.check(identifier)
+  },
+}
 
 // Other API endpoints: 100 requests per minute per user
-export const apiRateLimiter = new RateLimiter(100, 60 * 1000)
+const upstashApiRateLimiter = redis
+  ? new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(100, '1 m'),
+      analytics: true,
+      prefix: 'ratelimit:api',
+    })
+  : null
+
+const inMemoryApiRateLimiter = new InMemoryRateLimiter(100, 60 * 1000)
+
+export const apiRateLimiter = {
+  check: async (identifier: string) => {
+    if (upstashApiRateLimiter) {
+      const result = await upstashApiRateLimiter.limit(identifier)
+      return {
+        success: result.success,
+        limit: result.limit,
+        remaining: result.remaining,
+        resetAt: result.reset, // Upstash uses 'reset' (timestamp in ms)
+      }
+    }
+    return inMemoryApiRateLimiter.check(identifier)
+  },
+}
+
+/**
+ * Helper function to check rate limit and return consistent response
+ * Works with both Upstash and in-memory rate limiters
+ */
+export async function checkRateLimit(
+  limiter: typeof claudeRateLimiter | typeof apiRateLimiter,
+  identifier: string
+): Promise<{ success: boolean; limit: number; remaining: number; resetAt: number }> {
+  return limiter.check(identifier)
+}

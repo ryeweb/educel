@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { NextRequest, NextResponse } from 'next/server'
 import { GenerateRequest, LearnContent, TopicOption, ClarifyResponse, ExpandedContent, LessonPlanContent, getFallbackSources } from '@/lib/types'
-import { claudeRateLimiter } from '@/lib/rate-limit'
+import { claudeRateLimiter, checkRateLimit } from '@/lib/rate-limit'
 import { createClient } from '@/lib/supabase/server'
 import { withTimeout, TIMEOUTS, TimeoutError } from '@/lib/timeout'
 
@@ -367,7 +367,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Apply rate limiting (20 requests per hour per user)
-    const rateLimitResult = await claudeRateLimiter.check(user.id)
+    const rateLimitResult = await checkRateLimit(claudeRateLimiter, user.id)
 
     if (!rateLimitResult.success) {
       const resetDate = new Date(rateLimitResult.resetAt)

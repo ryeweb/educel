@@ -10,7 +10,8 @@ import { LoadingSpinner, TopicCardSkeleton } from '@/components/loading'
 import { RotatingHeadline } from '@/components/rotating-headline'
 import { ThemeDropdown } from '@/components/theme-dropdown'
 import { TopicIcon } from '@/components/topic-icon'
-import { MoreHorizontal, BookOpen, Sparkles, Send, Settings, Bookmark, LogOut, ArrowRight } from 'lucide-react'
+import { NavMenu } from '@/components/nav-menu'
+import { MoreHorizontal, BookOpen, Sparkles, Send, ArrowRight } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import type { UserPrefs, TopicOption, ClarifyResponse, LearnItem } from '@/lib/types'
 import { formatDate } from '@/lib/utils'
@@ -428,15 +429,7 @@ export default function HomePage() {
           </div>
           <div className="flex items-center gap-1">
             <ThemeDropdown onThemeChange={handleThemeChange} />
-            <Button variant="ghost" size="icon" onClick={() => router.push('/saved')}>
-              <Bookmark className="h-5 w-5" />
-            </Button>
-            <Button variant="ghost" size="icon" onClick={() => router.push('/settings')}>
-              <Settings className="h-5 w-5" />
-            </Button>
-            <Button variant="ghost" size="icon" onClick={handleLogout}>
-              <LogOut className="h-5 w-5" />
-            </Button>
+            <NavMenu userEmail={user.email} />
           </div>
         </div>
       </header>
@@ -551,7 +544,7 @@ export default function HomePage() {
 
         {recentItem && (
           <section>
-            <h2 className="text-xl font-semibold mb-4 font-[family-name:var(--font-dm-sans)]">Continue where you left off</h2>
+            <h2 className="text-lg font-semibold mb-4 font-[family-name:var(--font-dm-sans)]">Continue where you left off</h2>
             <Card 
               className="card-interactive"
               onClick={() => router.push(`/learn/${recentItem.id}`)}
@@ -562,7 +555,7 @@ export default function HomePage() {
                     <MoreHorizontal className="h-5 w-5 text-muted-foreground" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-medium">{recentItem.content.title}</h3>
+                    <h3 className="font-medium text-lg">{recentItem.content.title}</h3>
                     <p className="text-sm text-muted-foreground mt-1">{recentItem.topic}</p>
                     <p className="text-xs text-muted-foreground mt-2">
                       Last opened {formatDate(recentItem.created_at)}

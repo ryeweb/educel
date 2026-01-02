@@ -9,20 +9,18 @@ import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { LoadingSpinner } from '@/components/loading'
+import { ActionButtons } from '@/components/action-buttons'
+import { NavMenu } from '@/components/nav-menu'
 import type { LearnItem, LearnContent, TopicOption, UserPrefs, ExpandedContent, LessonPlan, LessonPlanContent } from '@/lib/types'
-import { 
-  ArrowLeft, 
-  BookOpen, 
-  Bookmark, 
-  BookmarkCheck, 
+import {
+  ArrowLeft,
+  BookOpen,
   ChevronRight,
   ChevronLeft,
-  ChevronDown,
   Lightbulb,
   Compass,
   Check,
   ExternalLink,
-  GraduationCap,
   Link as LinkIcon,
 } from 'lucide-react'
 
@@ -36,21 +34,12 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
   const [savingBookmark, setSavingBookmark] = useState(false)
   const [showQuiz, setShowQuiz] = useState(false)
   const [showAnswer, setShowAnswer] = useState(false)
-  
+  const [userEmail, setUserEmail] = useState<string | undefined>(undefined)
+
   // Navigation state
   const [allItems, setAllItems] = useState<LearnItem[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
-  
-  // Expanded content state - cached
-  const [expandedContent, setExpandedContent] = useState<ExpandedContent | null>(null)
-  const [loadingExpand, setLoadingExpand] = useState(false)
-  const [isExpanded, setIsExpanded] = useState(false)
-  
-  // Lesson plan state - cached
-  const [lessonPlan, setLessonPlan] = useState<LessonPlan | null>(null)
-  const [loadingLessonPlan, setLoadingLessonPlan] = useState(false)
-  const [showLessonPlan, setShowLessonPlan] = useState(false)
-  
+
   // Adjacent options state
   const [adjacentOptions, setAdjacentOptions] = useState<TopicOption[] | null>(null)
   const [loadingAdjacent, setLoadingAdjacent] = useState(false)
@@ -62,7 +51,13 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
     loadPrefs()
     checkIfSaved()
     loadAllItems()
+    loadUser()
   }, [resolvedParams.id])
+
+  async function loadUser() {
+    const { data: { user } } = await supabase.auth.getUser()
+    setUserEmail(user?.email)
+  }
 
   // Keyboard navigation
   useEffect(() => {
@@ -80,27 +75,14 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
 
   async function loadItem() {
     setLoading(true)
-    setShowLessonPlan(false)
     setAdjacentOptions(null)
     setShowAnswer(false)
-    
+
     try {
       const res = await fetch(`/api/learn?id=${resolvedParams.id}`)
       const data = await res.json()
       if (data.item) {
         setItem(data.item)
-        
-        // Check for cached expanded content
-        if (data.item.expanded_content) {
-          setExpandedContent(data.item.expanded_content)
-          setIsExpanded(true)
-        } else {
-          setExpandedContent(null)
-          setIsExpanded(false)
-        }
-        
-        // Check for existing lesson plan
-        checkExistingLessonPlan(resolvedParams.id)
       }
     } catch (error) {
       console.error('Error loading item:', error)
@@ -148,22 +130,7 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
     }
   }
 
-  async function checkExistingLessonPlan(learnItemId: string) {
-    try {
-      const res = await fetch(`/api/lesson-plan?learn_item_id=${learnItemId}`)
-      const data = await res.json()
-      if (data.plan) {
-        setLessonPlan(data.plan)
-      } else {
-        setLessonPlan(null)
-      }
-    } catch (error) {
-      console.error('Error checking lesson plan:', error)
-    }
-  }
-
   async function toggleSave() {
-    setSavingBookmark(true)
     try {
       if (isSaved) {
         await fetch(`/api/saved?item_type=learning&item_id=${resolvedParams.id}`, { method: 'DELETE' })
@@ -178,8 +145,26 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
       }
     } catch (error) {
       console.error('Error toggling save:', error)
-    } finally {
-      setSavingBookmark(false)
+    }
+  }
+
+  function handleShare() {
+    const url = `${window.location.origin}/learn/${resolvedParams.id}`
+    const title = item?.content?.title || 'Learning Item'
+
+    if (navigator.share) {
+      navigator.share({
+        title,
+        url,
+      }).catch((error) => {
+        if (error.name !== 'AbortError') {
+          console.error('Error sharing:', error)
+        }
+      })
+    } else {
+      // Fallback: copy to clipboard
+      navigator.clipboard.writeText(url)
+      alert('Link copied to clipboard!')
     }
   }
 
@@ -194,101 +179,6 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
     if (currentIndex < allItems.length - 1) {
       const nextItem = allItems[currentIndex + 1]
       router.push(`/learn/${nextItem.id}`)
-    }
-  }
-
-  async function handleLearnMore() {
-    if (!prefs || !item || isExpanded) return
-    setLoadingExpand(true)
-    
-    try {
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'expand_content',
-          preferred_topics: prefs.preferred_topics,
-          depth: prefs.depth,
-          topic: item.topic,
-          prior_item: item.content,
-        }),
-      })
-      const data = await res.json()
-      
-      if (data.error) {
-        console.error('Error:', data.error)
-        return
-      }
-
-      // Remove _meta if present
-      const { _meta, ...cleanData } = data
-
-      // Save expanded content to learn_item for caching
-      await fetch('/api/learn', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: item.id,
-          expanded_content: cleanData,
-        }),
-      })
-
-      setExpandedContent(cleanData)
-      setIsExpanded(true)
-    } catch (error) {
-      console.error('Error:', error)
-    } finally {
-      setLoadingExpand(false)
-    }
-  }
-
-  async function handleCreateLessonPlan() {
-    if (!prefs || !item || lessonPlan) return
-    setLoadingLessonPlan(true)
-    
-    try {
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'lesson_plan',
-          preferred_topics: prefs.preferred_topics,
-          depth: prefs.depth,
-          topic: item.topic,
-          prior_item: item.content,
-        }),
-      })
-      const planData = await res.json()
-      
-      if (planData.error) {
-        console.error('Error:', planData.error)
-        return
-      }
-
-      // Remove _meta if present
-      const { _meta, ...cleanPlanData } = planData
-
-      // Save the lesson plan (auto-saves to saved_items)
-      const saveRes = await fetch('/api/lesson-plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          learn_item_id: item.id,
-          title: `Lesson Plan: ${item.content.title}`,
-          topic: item.topic,
-          content: cleanPlanData,
-        }),
-      })
-      const saveData = await saveRes.json()
-      
-      if (saveData.plan) {
-        setLessonPlan(saveData.plan)
-        setShowLessonPlan(true)
-      }
-    } catch (error) {
-      console.error('Error:', error)
-    } finally {
-      setLoadingLessonPlan(false)
     }
   }
 
@@ -388,12 +278,6 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
   }
 
   const content = item.content as LearnContent
-  const planContent = lessonPlan ? {
-    goals: lessonPlan.goals,
-    resources: lessonPlan.resources,
-    exercises: lessonPlan.exercises,
-    daily_plan: lessonPlan.daily_plan,
-  } as LessonPlanContent : undefined
 
   return (
     <div className="min-h-screen">
@@ -404,7 +288,7 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
             <ArrowLeft className="h-4 w-4 mr-2" />
             Home
           </Button>
-          
+
           {/* Navigation controls */}
           {allItems.length > 1 && (
             <div className="flex items-center gap-1">
@@ -431,19 +315,8 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
               </Button>
             </div>
           )}
-          
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            onClick={toggleSave}
-            disabled={savingBookmark}
-          >
-            {isSaved ? (
-              <BookmarkCheck className="h-5 w-5 text-primary" />
-            ) : (
-              <Bookmark className="h-5 w-5" />
-            )}
-          </Button>
+
+          <NavMenu userEmail={userEmail} />
         </div>
       </header>
 
@@ -509,34 +382,6 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
                 </div>
               </div>
             )}
-
-            {/* Expanded Content Section - persisted */}
-            {isExpanded && expandedContent && (
-              <div className="border-t pt-6 mt-6 animate-in">
-                <h3 className="font-semibold text-lg mb-4 flex items-center gap-2 font-[family-name:var(--font-dm-sans)]">
-                  <ChevronDown className="h-5 w-5 text-primary" />
-                  Deep Dive
-                </h3>
-                <div className="space-y-4 text-sm leading-relaxed">
-                  {expandedContent.paragraphs.map((para, i) => (
-                    <p key={i}>{para}</p>
-                  ))}
-                </div>
-                {expandedContent.additional_bullets && expandedContent.additional_bullets.length > 0 && (
-                  <div className="mt-6 space-y-3">
-                    <h4 className="font-medium">Advanced Insights</h4>
-                    {expandedContent.additional_bullets.map((bullet, i) => (
-                      <div key={i} className="flex items-start gap-3">
-                        <div className="h-5 w-5 rounded-full bg-secondary flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <Check className="h-3 w-3" />
-                        </div>
-                        <p className="text-sm">{bullet}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
           </CardContent>
         </Card>
 
@@ -573,133 +418,16 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
           </CardContent>
         </Card>
 
-        {/* Lesson Plan Display - persisted */}
-        {showLessonPlan && lessonPlan && planContent && (
-          <Card className="mb-6 animate-in">
-            <CardContent className="p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <GraduationCap className="h-5 w-5 text-primary" />
-                <h3 className="font-semibold text-lg font-[family-name:var(--font-dm-sans)]">Your Lesson Plan</h3>
-                <span className="text-xs bg-accent text-accent-foreground px-2 py-0.5 rounded-full ml-auto">
-                  Auto-saved
-                </span>
-              </div>
-              
-              {/* Goals */}
-              <div className="mb-6">
-                <h4 className="font-medium mb-2">Learning Goals</h4>
-                <ul className="space-y-2">
-                  {planContent.goals.map((goal, i) => (
-                    <li key={i} className="flex items-start gap-2 text-sm">
-                      <span className="text-primary font-medium">{i + 1}.</span>
-                      {goal}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              {/* Resources */}
-              <div className="mb-6">
-                <h4 className="font-medium mb-2">Resources ({planContent.resources.length})</h4>
-                <div className="space-y-2">
-                  {planContent.resources.slice(0, 5).map((resource, i) => (
-                    <a
-                      key={i}
-                      href={resource.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors"
-                    >
-                      <ExternalLink className="h-3 w-3 flex-shrink-0" />
-                      <span className="truncate">{resource.title}</span>
-                      <span className="text-xs bg-muted px-2 py-0.5 rounded">{resource.type}</span>
-                    </a>
-                  ))}
-                </div>
-              </div>
-
-              {/* Exercises */}
-              <div className="mb-6">
-                <h4 className="font-medium mb-2">Exercises</h4>
-                <ul className="space-y-2">
-                  {planContent.exercises.map((exercise, i) => (
-                    <li key={i} className="flex items-start gap-2 text-sm">
-                      <Check className="h-4 w-4 text-muted-foreground mt-0.5" />
-                      {exercise}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              {/* Daily Plan Preview */}
-              <div>
-                <h4 className="font-medium mb-2">{planContent.daily_plan.length}-Day Plan</h4>
-                <div className="grid gap-2">
-                  {planContent.daily_plan.slice(0, 7).map((day, i) => (
-                    <div key={i} className="flex items-start gap-3 text-sm p-2 rounded bg-muted/30">
-                      <span className="font-medium text-primary w-12">Day {day.day}</span>
-                      <span className="text-muted-foreground">{day.focus}</span>
-                    </div>
-                  ))}
-                  {planContent.daily_plan.length > 7 && (
-                    <p className="text-xs text-muted-foreground">
-                      + {planContent.daily_plan.length - 7} more days...
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <Button 
-                variant="ghost" 
-                className="w-full mt-4"
-                onClick={() => setShowLessonPlan(false)}
-              >
-                Hide lesson plan
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-
         {/* Action buttons */}
         <div className="space-y-3">
-          {!isExpanded ? (
-            <Button 
-              className="w-full" 
-              size="lg"
-              onClick={handleLearnMore}
-              disabled={loadingExpand}
-            >
-              {loadingExpand ? (
-                <LoadingSpinner className="h-4 w-4" />
-              ) : (
-                <>
-                  Learn more
-                  <ChevronRight className="h-4 w-4 ml-2" />
-                </>
-              )}
-            </Button>
-          ) : (
-            <Button 
-              className="w-full" 
-              size="lg"
-              onClick={() => lessonPlan ? setShowLessonPlan(true) : handleCreateLessonPlan()}
-              disabled={loadingLessonPlan}
-            >
-              {loadingLessonPlan ? (
-                <LoadingSpinner className="h-4 w-4" />
-              ) : lessonPlan ? (
-                <>
-                  <GraduationCap className="h-4 w-4 mr-2" />
-                  View Lesson Plan
-                </>
-              ) : (
-                <>
-                  <GraduationCap className="h-4 w-4 mr-2" />
-                  Create a Lesson Plan
-                </>
-              )}
-            </Button>
-          )}
+          <Button
+            className="w-full"
+            size="lg"
+            onClick={() => router.push(`/learn/${item.id}/article`)}
+          >
+            Learn more
+            <ChevronRight className="h-4 w-4 ml-2" />
+          </Button>
 
           {adjacentOptions ? (
             <Card>
@@ -752,6 +480,15 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
             </Button>
           )}
         </div>
+
+        {/* Action Buttons */}
+        <ActionButtons
+          isSaved={isSaved}
+          onSave={toggleSave}
+          onShare={handleShare}
+          itemTitle={content.title}
+          itemUrl={`${typeof window !== 'undefined' ? window.location.origin : ''}/learn/${item.id}`}
+        />
       </main>
     </div>
   )

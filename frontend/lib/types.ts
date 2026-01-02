@@ -114,20 +114,14 @@ export interface GenerateRequest {
 
 export const CURATED_TOPICS = [
   'Productivity',
-  'Communication',
-  'Leadership',
   'Psychology',
-  'Sales',
-  'Negotiation',
-  'Writing',
-  'Design',
-  'Finance basics',
-  'Health habits',
-  'History',
-  'Technology',
-  'Career growth',
-  'Entrepreneurship',
   'Decision-making',
+  'Communication',
+  'Health habits',
+  'Technology',
+  'Entrepreneurship',
+  'Design',
+  'Finance',
 ] as const
 
 export const ROTATING_HEADLINES = [
