@@ -1,1 +1,31 @@
-{"pages":{},"app":{"/app/frontend/app/layout":["static/media/13971731025ec697-s.p.woff2","static/media/e4af272ccee01ff0-s.p.woff2"]},"appUsingSizeAdjust":true,"pagesUsingSizeAdjust":false}
+{
+  "app": {
+    "[project]/frontend/app/_not-found/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2",
+      "static/media/5c285b27cdda1fe8-s.p.a62025f2.woff2"
+    ],
+    "[project]/frontend/app/learn/[id]/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2",
+      "static/media/5c285b27cdda1fe8-s.p.a62025f2.woff2"
+    ],
+    "[project]/frontend/app/onboarding/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2",
+      "static/media/5c285b27cdda1fe8-s.p.a62025f2.woff2"
+    ],
+    "[project]/frontend/app/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2",
+      "static/media/5c285b27cdda1fe8-s.p.a62025f2.woff2"
+    ],
+    "[project]/frontend/app/saved/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2",
+      "static/media/5c285b27cdda1fe8-s.p.a62025f2.woff2"
+    ],
+    "[project]/frontend/app/settings/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2",
+      "static/media/5c285b27cdda1fe8-s.p.a62025f2.woff2"
+    ]
+  },
+  "appUsingSizeAdjust": true,
+  "pages": {},
+  "pagesUsingSizeAdjust": false
+}

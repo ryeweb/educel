@@ -1,105 +1,112 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextRequest, NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
+import { CreateSavedItemSchema } from '@/lib/validations'
+import { z } from 'zod'
+import { withTimeout, TIMEOUTS, TimeoutError } from '@/lib/timeout'
 
 export async function GET(req: NextRequest) {
-  const supabase = await createClient()
-  
-  const { data: { user } } = await supabase.auth.getUser()
-  
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  try {
+    const supabase = await createClient()
 
-  const { searchParams } = new URL(req.url)
-  const item_type = searchParams.get('item_type')
+    const { data: { user } } = await supabase.auth.getUser()
 
-  // Build query
-  let query = supabase
-    .from('saved_items')
-    .select('*')
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: false })
-
-  if (item_type) {
-    query = query.eq('item_type', item_type)
-  }
-
-  const { data: savedItems, error } = await query
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
-  // Fetch related items
-  const learningIds = savedItems
-    .filter(s => s.item_type === 'learning')
-    .map(s => s.item_id)
-  
-  const lessonPlanIds = savedItems
-    .filter(s => s.item_type === 'lesson_plan')
-    .map(s => s.item_id)
-
-  // Fetch learn items
-  let learnItems: Record<string, unknown> = {}
-  if (learningIds.length > 0) {
-    const { data: items } = await supabase
-      .from('learn_items')
-      .select('*')
-      .in('id', learningIds)
-    
-    if (items) {
-      learnItems = items.reduce((acc, item) => {
-        acc[item.id] = item
-        return acc
-      }, {} as Record<string, unknown>)
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-  }
 
-  // Fetch lesson plans
-  let lessonPlans: Record<string, unknown> = {}
-  if (lessonPlanIds.length > 0) {
-    const { data: plans } = await supabase
-      .from('lesson_plans')
-      .select('*')
-      .in('id', lessonPlanIds)
-    
-    if (plans) {
-      lessonPlans = plans.reduce((acc, plan) => {
-        acc[plan.id] = plan
-        return acc
-      }, {} as Record<string, unknown>)
+    const { searchParams } = new URL(req.url)
+    const item_type = searchParams.get('item_type')
+
+    // Wrap database operations with timeout
+    const items = await withTimeout(
+      (async () => {
+        // Get saved items first
+        let query = supabase
+          .from('saved_items')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(100)
+
+        if (item_type) {
+          query = query.eq('item_type', item_type)
+        }
+
+        const { data: savedItems, error } = await query
+
+        if (error) {
+          throw new Error(error.message)
+        }
+
+        // Optimized approach: Use Promise.all for parallel fetching (2 queries instead of 3)
+        const learningIds = savedItems.filter(s => s.item_type === 'learning').map(s => s.item_id)
+        const lessonPlanIds = savedItems.filter(s => s.item_type === 'lesson_plan').map(s => s.item_id)
+
+        const [learnItemsResult, lessonPlansResult] = await Promise.all([
+          learningIds.length > 0
+            ? supabase.from('learn_items').select('*').in('id', learningIds)
+            : Promise.resolve({ data: [] }),
+          lessonPlanIds.length > 0
+            ? supabase.from('lesson_plans').select('*').in('id', lessonPlanIds)
+            : Promise.resolve({ data: [] })
+        ])
+
+        // Create lookup maps
+        const learnItemsMap = new Map(learnItemsResult.data?.map(item => [item.id, item]) || [])
+        const lessonPlansMap = new Map(lessonPlansResult.data?.map(plan => [plan.id, plan]) || [])
+
+        // Combine data
+        return savedItems.map(saved => ({
+          ...saved,
+          learn_item: saved.item_type === 'learning' ? learnItemsMap.get(saved.item_id) : undefined,
+          lesson_plan: saved.item_type === 'lesson_plan' ? lessonPlansMap.get(saved.item_id) : undefined,
+        }))
+      })(),
+      TIMEOUTS.DATABASE,
+      'Database query timed out'
+    )
+
+    return NextResponse.json({ items })
+  } catch (error) {
+    if (error instanceof TimeoutError) {
+      return NextResponse.json({ error: error.message }, { status: 504 })
     }
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to fetch saved items' },
+      { status: 500 }
+    )
   }
-
-  // Combine data
-  const items = savedItems.map(saved => ({
-    ...saved,
-    learn_item: saved.item_type === 'learning' ? learnItems[saved.item_id] : undefined,
-    lesson_plan: saved.item_type === 'lesson_plan' ? lessonPlans[saved.item_id] : undefined,
-  }))
-
-  return NextResponse.json({ items })
 }
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
-  
+
   const { data: { user } } = await supabase.auth.getUser()
-  
+
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const body = await req.json()
-  const { item_type = 'learning', item_id, learn_item_id } = body
-  
-  // Support legacy format (learn_item_id)
-  const actualItemId = item_id || learn_item_id
-
-  if (!actualItemId) {
-    return NextResponse.json({ error: 'Missing item_id' }, { status: 400 })
+  // Validate request body with Zod
+  let validatedData
+  try {
+    const body = await req.json()
+    validatedData = CreateSavedItemSchema.parse(body)
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({
+        error: 'Invalid request data',
+        details: error.errors
+      }, { status: 400 })
+    }
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
+
+  const { item_type, item_id, learn_item_id } = validatedData
+
+  // Support legacy format (learn_item_id)
+  const actualItemId = item_id || learn_item_id!
 
   // Check if already saved
   const { data: existing } = await supabase

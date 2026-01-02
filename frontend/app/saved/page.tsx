@@ -171,18 +171,20 @@ export default function SavedPage() {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
                             <h3 className="font-medium truncate">
-                              {isLearning 
+                              {isLearning
                                 ? learnItem?.content?.title || 'Untitled'
-                                : lessonPlan?.title || 'Untitled Plan'
+                                : `Lesson Plan: ${lessonPlan?.topic || 'Untitled'}`
                               }
                             </h3>
                             <span className="text-xs bg-muted px-2 py-0.5 rounded flex-shrink-0">
                               {isLearning ? 'Learning' : 'Lesson Plan'}
                             </span>
                           </div>
-                          <p className="text-sm text-muted-foreground mt-1 truncate">
-                            {isLearning ? learnItem?.topic : lessonPlan?.topic}
-                          </p>
+                          {isLearning && (
+                            <p className="text-sm text-muted-foreground mt-1 truncate">
+                              {learnItem?.topic}
+                            </p>
+                          )}
                           <p className="text-xs text-muted-foreground mt-2">
                             Saved {formatDate(item.created_at)}
                           </p>

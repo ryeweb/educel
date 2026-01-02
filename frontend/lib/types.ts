@@ -35,12 +35,15 @@ export interface LessonPlan {
   id: string
   user_id: string
   learn_item_id?: string | null
-  title: string
   topic: string
-  content: LessonPlanContent
+  goals: string[]
+  resources: ResourceItem[]
+  exercises: string[]
+  daily_plan: DayPlanItem[]
   created_at: string
 }
 
+// Helper type for structuring lesson plan content before saving
 export interface LessonPlanContent {
   goals: string[]
   resources: ResourceItem[]

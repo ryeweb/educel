@@ -1,6 +1,9 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { NextRequest, NextResponse } from 'next/server'
 import { GenerateRequest, LearnContent, TopicOption, ClarifyResponse, ExpandedContent, LessonPlanContent, getFallbackSources } from '@/lib/types'
+import { claudeRateLimiter } from '@/lib/rate-limit'
+import { createClient } from '@/lib/supabase/server'
+import { withTimeout, TIMEOUTS, TimeoutError } from '@/lib/timeout'
 
 const anthropic = new Anthropic({
   apiKey: process.env.CLAUDE_API_KEY,
@@ -253,19 +256,57 @@ Include 5-7 resources of mixed types. Create a 7-14 day plan that builds progres
   }
 }
 
-// Single Claude call - no retries for sources
+// Retry wrapper with exponential backoff
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = 3,
+  baseDelayMs = 1000
+): Promise<T> {
+  let lastError: Error | undefined
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn()
+    } catch (error) {
+      lastError = error as Error
+
+      // Don't retry on validation errors or client errors (4xx)
+      if (error instanceof Error && error.message.includes('does not match expected schema')) {
+        throw error
+      }
+
+      // Only retry on the last attempt
+      if (attempt < maxRetries - 1) {
+        // Exponential backoff: 1s, 2s, 4s
+        const delayMs = baseDelayMs * Math.pow(2, attempt)
+        console.log(`Retry attempt ${attempt + 1}/${maxRetries} after ${delayMs}ms delay`)
+        await new Promise(resolve => setTimeout(resolve, delayMs))
+      }
+    }
+  }
+
+  throw lastError || new Error('Max retries exceeded')
+}
+
+// Claude API call with retry logic
 async function generateContent(
   systemPrompt: string,
   userPrompt: string,
   validateFn: (obj: unknown) => boolean,
   topic?: string
 ): Promise<{ result: unknown; usedFallbackSources: boolean }> {
-  const message = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 2048,
-    messages: [{ role: 'user', content: userPrompt }],
-    system: systemPrompt,
+  const result = await withRetry(async () => {
+    const message = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 2048,
+      messages: [{ role: 'user', content: userPrompt }],
+      system: systemPrompt,
+    })
+
+    return message
   })
+
+  const message = result
 
   const textContent = message.content.find(block => block.type === 'text')
   if (!textContent || textContent.type !== 'text') {
@@ -308,6 +349,45 @@ async function generateContent(
 
 export async function POST(req: NextRequest) {
   try {
+    // Validate Claude API key is configured
+    if (!process.env.CLAUDE_API_KEY) {
+      console.error('CLAUDE_API_KEY environment variable is not set')
+      return NextResponse.json(
+        { error: 'AI service is not configured. Please contact support.' },
+        { status: 503 }
+      )
+    }
+
+    // Get user for rate limiting
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    // Apply rate limiting (20 requests per hour per user)
+    const rateLimitResult = await claudeRateLimiter.check(user.id)
+
+    if (!rateLimitResult.success) {
+      const resetDate = new Date(rateLimitResult.resetAt)
+      return NextResponse.json(
+        {
+          error: 'Rate limit exceeded. Please try again later.',
+          resetAt: resetDate.toISOString(),
+          limit: rateLimitResult.limit
+        },
+        {
+          status: 429,
+          headers: {
+            'X-RateLimit-Limit': rateLimitResult.limit.toString(),
+            'X-RateLimit-Remaining': '0',
+            'X-RateLimit-Reset': resetDate.toISOString(),
+          }
+        }
+      )
+    }
+
     const body: GenerateRequest = await req.json()
     const { type, depth, topic, custom_topic } = body
 
@@ -348,19 +428,33 @@ export async function POST(req: NextRequest) {
         )
     }
 
-    const { result, usedFallbackSources } = await generateContent(
-      systemPrompt, 
-      userPrompt, 
-      validateFn,
-      topic || custom_topic
+    // Wrap generation with timeout (30 seconds)
+    const { result, usedFallbackSources } = await withTimeout(
+      generateContent(
+        systemPrompt,
+        userPrompt,
+        validateFn,
+        topic || custom_topic
+      ),
+      TIMEOUTS.CLAUDE_API,
+      'AI generation timed out. Please try again.'
     )
-    
-    return NextResponse.json({ 
-      ...result as object, 
-      _meta: { usedFallbackSources } 
+
+    return NextResponse.json({
+      ...result as object,
+      _meta: { usedFallbackSources }
     })
   } catch (error) {
     console.error('Generate API error:', error)
+
+    // Handle timeout errors specifically
+    if (error instanceof TimeoutError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 504 } // Gateway Timeout
+      )
+    }
+
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Generation failed' },
       { status: 500 }

@@ -388,7 +388,12 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
   }
 
   const content = item.content as LearnContent
-  const planContent = lessonPlan?.content as LessonPlanContent | undefined
+  const planContent = lessonPlan ? {
+    goals: lessonPlan.goals,
+    resources: lessonPlan.resources,
+    exercises: lessonPlan.exercises,
+    daily_plan: lessonPlan.daily_plan,
+  } as LessonPlanContent : undefined
 
   return (
     <div className="min-h-screen">

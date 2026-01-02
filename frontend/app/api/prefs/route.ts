@@ -1,5 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextRequest, NextResponse } from 'next/server'
+import { UpdateUserPrefsSchema } from '@/lib/validations'
+import { z } from 'zod'
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient()
@@ -25,15 +27,29 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
-  
+
   const { data: { user } } = await supabase.auth.getUser()
-  
+
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const body = await req.json()
-  const { preferred_topics, depth, theme } = body
+  // Validate request body with Zod
+  let validatedData
+  try {
+    const body = await req.json()
+    validatedData = UpdateUserPrefsSchema.parse(body)
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({
+        error: 'Invalid request data',
+        details: error.errors
+      }, { status: 400 })
+    }
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+  }
+
+  const { preferred_topics, depth, theme } = validatedData
 
   const updateData: Record<string, unknown> = {
     user_id: user.id,
