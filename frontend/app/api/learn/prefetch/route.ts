@@ -58,34 +58,53 @@ export async function POST(req: NextRequest) {
   }
 
   // 2. Generate new content from Claude
-  const generateRes = await fetch(`${req.nextUrl.origin}/api/generate`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      // Forward auth cookies
-      'Cookie': req.headers.get('cookie') || '',
-    },
-    body: JSON.stringify({
-      type: 'learn_item',
-      preferred_topics,
-      depth,
-      topic,
-    }),
-  })
+  let generateRes
+  try {
+    // Use proper URL construction for Vercel serverless
+    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || new URL(req.url).origin
+    generateRes = await fetch(`${baseUrl}/api/generate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        // Forward auth cookies
+        'Cookie': req.headers.get('cookie') || '',
+      },
+      body: JSON.stringify({
+        type: 'learn_item',
+        preferred_topics,
+        depth,
+        topic,
+      }),
+    })
+  } catch (fetchError) {
+    console.error('Prefetch fetch error:', fetchError)
+    return NextResponse.json({
+      error: 'Failed to generate content. Please try again.',
+      details: fetchError instanceof Error ? fetchError.message : 'Unknown error'
+    }, { status: 500 })
+  }
 
   if (!generateRes.ok) {
-    const error = await generateRes.json()
-    const status = generateRes.status
+    let errorMessage = 'Generation failed'
+    try {
+      const error = await generateRes.json()
+      errorMessage = error.error || errorMessage
 
-    // Pass through rate limit errors
-    if (status === 429) {
-      return NextResponse.json({
-        error: 'Rate limit reached. Please wait a moment and try again.',
-        rateLimited: true
-      }, { status: 429 })
+      // Pass through rate limit errors
+      if (generateRes.status === 429) {
+        return NextResponse.json({
+          error: 'Rate limit reached. Please wait a moment and try again.',
+          rateLimited: true
+        }, { status: 429 })
+      }
+    } catch (e) {
+      console.error('Error parsing generate error response:', e)
     }
 
-    return NextResponse.json({ error: error.error || 'Generation failed' }, { status: status || 500 })
+    return NextResponse.json({
+      error: errorMessage,
+      status: generateRes.status
+    }, { status: generateRes.status || 500 })
   }
 
   const content = await generateRes.json()

@@ -493,20 +493,27 @@ export async function POST(req: NextRequest) {
     if (type === 'topic_options') {
       const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString()
 
-      const { data: cachedOptions } = await supabase
+      const { data: cachedOptions, error: cacheError } = await supabase
         .from('topic_options_cache')
         .select('*')
         .eq('user_id', user.id)
         .gte('created_at', tenMinutesAgo)
-        .single()
+        .maybeSingle()
+
+      if (cacheError) {
+        console.error('Cache lookup error:', cacheError)
+      }
 
       // Return cached options if fresh
       if (cachedOptions?.options) {
+        console.log('Returning cached topic options')
         return NextResponse.json({
           ...cachedOptions.options,
           _meta: { cached: true, session_id: cachedOptions.session_id },
         })
       }
+
+      console.log('No valid cache found, generating new topics')
 
       // Otherwise, add personalization for fresh generation
       const [engagementScores, recentTopics] = await Promise.all([
@@ -590,10 +597,13 @@ export async function POST(req: NextRequest) {
         topic: normalizeTopic(option.topic),
       }))
 
-      await supabase.from('home_recos').insert(recoRows)
+      const { error: recoError } = await supabase.from('home_recos').insert(recoRows)
+      if (recoError) {
+        console.error('Error saving home_recos:', recoError)
+      }
 
       // Cache topic options for 10 minutes
-      await supabase
+      const { error: cacheError } = await supabase
         .from('topic_options_cache')
         .upsert({
           user_id: user.id,
@@ -603,8 +613,14 @@ export async function POST(req: NextRequest) {
           onConflict: 'user_id',
         })
 
+      if (cacheError) {
+        console.error('Error saving cache:', cacheError)
+      } else {
+        console.log('Successfully cached topic options for user:', user.id)
+      }
+
       // Log reco_shown event
-      await supabase.from('user_events').insert({
+      const { error: eventError } = await supabase.from('user_events').insert({
         user_id: user.id,
         event_type: 'reco_shown',
         meta: {
@@ -613,6 +629,9 @@ export async function POST(req: NextRequest) {
           slots: ['A', 'B', 'C'],
         },
       })
+      if (eventError) {
+        console.error('Error logging event:', eventError)
+      }
 
       // Return with session_id for client tracking
       return NextResponse.json({
