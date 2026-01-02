@@ -51,17 +51,18 @@ These are **public** keys designed to be exposed in client-side code. Supabase u
 
 ### 2. Supabase Database Setup
 
-**IMPORTANT**: You must run the SQL migrations in your Supabase dashboard.
+**IMPORTANT**: The database schema is already set up in your Supabase project.
 
-1. Go to your Supabase project dashboard
-2. Navigate to **SQL Editor** → **New Query**
-3. Copy and run all the SQL from `SUPABASE_SETUP.md`
+Required tables:
+- `user_prefs` - User preferences and settings
+- `learn_items` - AI-generated learning content
+- `saved_items` - Bookmarked items
+- `lesson_plans` - Generated learning plans
+- `user_events` - Event tracking for personalization
+- `home_recos` - Topic recommendation history
+- `topic_options_cache` - Cached topic suggestions
 
-This creates:
-- `user_prefs` table (user preferences)
-- `learn_items` table (generated learning content)
-- `saved_items` table (bookmarked items)
-- Row Level Security policies
+All tables have Row Level Security (RLS) policies enabled for data protection.
 
 ### 3. Enable Email Auth
 

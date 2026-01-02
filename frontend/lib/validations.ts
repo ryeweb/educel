@@ -40,6 +40,7 @@ export const LearnContentSchema = z.object({
 export const ExpandedContentSchema = z.object({
   paragraphs: z.array(z.string().min(1).max(5000)).min(3).max(10),
   additional_bullets: z.array(z.string().min(1).max(500)).optional(),
+  one_line_takeaway: z.string().min(1).max(500),
 })
 
 export const CreateLearnItemSchema = z.object({
@@ -51,11 +52,12 @@ export const CreateLearnItemSchema = z.object({
 export const UpdateLearnItemSchema = z.object({
   id: z.string().uuid(),
   expanded_content: ExpandedContentSchema,
+  one_line_takeaway: z.string().min(1).max(500).optional(),
 })
 
 // User Preferences validation schemas
 export const UpdateUserPrefsSchema = z.object({
-  preferred_topics: z.array(z.string().min(1).max(100)).min(0).max(20).optional(),
+  preferred_topics: z.array(z.string().min(1).max(100)).min(3).max(20).optional(),
   depth: z.enum(['concise', 'deeper']).optional(),
   theme: z.enum(['light', 'dark', 'auto']).optional(),
 }).refine(

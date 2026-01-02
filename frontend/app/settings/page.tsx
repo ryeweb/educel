@@ -13,10 +13,12 @@ import { LoadingSpinner } from '@/components/loading'
 import { NavMenu } from '@/components/nav-menu'
 import { CURATED_TOPICS } from '@/lib/types'
 import type { UserPrefs } from '@/lib/types'
-import { ArrowLeft, Settings, Plus, X, Save } from 'lucide-react'
+import { ArrowLeft, Settings, Plus, X, Save, Sun, Moon, Monitor } from 'lucide-react'
+import { useTheme } from 'next-themes'
 
 export default function SettingsPage() {
   const router = useRouter()
+  const { setTheme: setUITheme } = useTheme()
   const [prefs, setPrefs] = useState<UserPrefs | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -29,6 +31,7 @@ export default function SettingsPage() {
   const [customTopics, setCustomTopics] = useState<string[]>([])
   const [newCustomTopic, setNewCustomTopic] = useState('')
   const [depth, setDepth] = useState<'concise' | 'deeper'>('concise')
+  const [theme, setTheme] = useState<'light' | 'dark' | 'auto'>('auto')
 
   const supabase = createClient()
 
@@ -65,6 +68,7 @@ export default function SettingsPage() {
         setSelectedTopics(curated)
         setCustomTopics(custom)
         setDepth(data.prefs.depth)
+        setTheme(data.prefs.theme || 'auto')
       }
     } catch (error) {
       console.error('Error loading prefs:', error)
@@ -97,12 +101,12 @@ export default function SettingsPage() {
   }
 
   async function handleSave() {
-    const allTopics = [...selectedTopics, ...customTopics]
-    
-    if (allTopics.length < 2) {
-      setError('Please select at least 2 topics')
+    if (selectedTopics.length < 3) {
+      setError('Please select at least 3 curated topics')
       return
     }
+
+    const allTopics = [...selectedTopics, ...customTopics]
 
     setSaving(true)
     setError('')
@@ -115,6 +119,7 @@ export default function SettingsPage() {
         body: JSON.stringify({
           preferred_topics: allTopics,
           depth,
+          theme,
         }),
       })
 
@@ -167,7 +172,7 @@ export default function SettingsPage() {
           <CardHeader>
             <CardTitle>Learning Topics</CardTitle>
             <CardDescription>
-              Select topics you want to learn about (at least 2)
+              Select topics you want to learn about (at least 3)
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -232,8 +237,8 @@ export default function SettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <RadioGroup 
-              value={depth} 
+            <RadioGroup
+              value={depth}
               onValueChange={(v) => {
                 setDepth(v as 'concise' | 'deeper')
                 setSuccess(false)
@@ -261,6 +266,64 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>Display Theme</CardTitle>
+            <CardDescription>
+              Choose how Educel looks
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <RadioGroup
+              value={theme}
+              onValueChange={(v) => {
+                const newTheme = v as 'light' | 'dark' | 'auto'
+                setTheme(newTheme)
+                // Apply theme immediately to UI
+                setUITheme(newTheme === 'auto' ? 'system' : newTheme)
+                setSuccess(false)
+              }}
+            >
+              <div className="flex items-start gap-3 p-3 rounded-lg border cursor-pointer hover:border-primary/50">
+                <RadioGroupItem value="light" id="light" className="mt-1" />
+                <div className="flex items-center gap-2">
+                  <Sun className="h-4 w-4 text-muted-foreground" />
+                  <div>
+                    <Label htmlFor="light" className="cursor-pointer font-medium">Light</Label>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Light mode for daytime reading
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 p-3 rounded-lg border cursor-pointer hover:border-primary/50 mt-2">
+                <RadioGroupItem value="dark" id="dark" className="mt-1" />
+                <div className="flex items-center gap-2">
+                  <Moon className="h-4 w-4 text-muted-foreground" />
+                  <div>
+                    <Label htmlFor="dark" className="cursor-pointer font-medium">Dark</Label>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Dark mode for low-light environments
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 p-3 rounded-lg border cursor-pointer hover:border-primary/50 mt-2">
+                <RadioGroupItem value="auto" id="auto" className="mt-1" />
+                <div className="flex items-center gap-2">
+                  <Monitor className="h-4 w-4 text-muted-foreground" />
+                  <div>
+                    <Label htmlFor="auto" className="cursor-pointer font-medium">Auto</Label>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Matches your system preferences
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </RadioGroup>
+          </CardContent>
+        </Card>
+
         {error && (
           <p className="text-destructive text-sm text-center mb-4">{error}</p>
         )}
@@ -269,11 +332,11 @@ export default function SettingsPage() {
           <p className="text-green-600 text-sm text-center mb-4">Settings saved successfully!</p>
         )}
 
-        <Button 
-          className="w-full" 
-          size="lg" 
+        <Button
+          className="w-full"
+          size="lg"
           onClick={handleSave}
-          disabled={saving || totalSelected < 2}
+          disabled={saving || selectedTopics.length < 3}
         >
           {saving ? (
             <LoadingSpinner className="h-4 w-4" />
@@ -286,7 +349,8 @@ export default function SettingsPage() {
         </Button>
 
         <p className="text-center text-sm text-muted-foreground mt-4">
-          {totalSelected} topic{totalSelected !== 1 ? 's' : ''} selected
+          {selectedTopics.length} curated topic{selectedTopics.length !== 1 ? 's' : ''} selected
+          {customTopics.length > 0 && ` + ${customTopics.length} custom`}
         </p>
       </main>
     </div>

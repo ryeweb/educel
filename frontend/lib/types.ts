@@ -29,6 +29,7 @@ export interface SourceLink {
 export interface ExpandedContent {
   paragraphs: string[]
   additional_bullets?: string[]
+  one_line_takeaway: string
 }
 
 export interface LessonPlan {
@@ -110,6 +111,8 @@ export interface GenerateRequest {
   topic?: string
   custom_topic?: string
   prior_item?: LearnContent
+  avoid_topics?: string[]
+  top_engaged_topic?: string
 }
 
 export const CURATED_TOPICS = [

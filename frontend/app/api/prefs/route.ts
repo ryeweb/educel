@@ -22,7 +22,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json({ prefs })
+  return NextResponse.json({ prefs }, {
+    headers: {
+      'Cache-Control': 'private, max-age=3600, stale-while-revalidate=7200',
+    },
+  })
 }
 
 export async function POST(req: NextRequest) {

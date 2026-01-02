@@ -32,7 +32,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 404 })
     }
 
-    return NextResponse.json({ item: data })
+    return NextResponse.json({ item: data }, {
+      headers: {
+        'Cache-Control': 'private, max-age=1800, stale-while-revalidate=3600',
+      },
+    })
   }
 
   const { data, error } = await supabase
@@ -46,7 +50,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json({ items: data })
+  return NextResponse.json({ items: data }, {
+    headers: {
+      'Cache-Control': 'private, max-age=1800, stale-while-revalidate=3600',
+    },
+  })
 }
 
 export async function POST(req: NextRequest) {
@@ -122,14 +130,20 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  const { id, expanded_content } = validatedData
+  const { id, expanded_content, one_line_takeaway } = validatedData
+
+  const updateData: Record<string, unknown> = {
+    expanded_content,
+    expanded_created_at: new Date().toISOString(),
+  }
+
+  if (one_line_takeaway) {
+    updateData.one_line_takeaway = one_line_takeaway
+  }
 
   const { data, error } = await supabase
     .from('learn_items')
-    .update({
-      expanded_content,
-      expanded_created_at: new Date().toISOString(),
-    })
+    .update(updateData)
     .eq('id', id)
     .eq('user_id', user.id)
     .select()

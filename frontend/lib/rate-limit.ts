@@ -68,17 +68,20 @@ class InMemoryRateLimiter {
 }
 
 // Create rate limiters based on whether Redis is available
-// Claude API: 20 requests per hour per user (conservative for cost control)
+// Claude API: Higher limit for development (100/hour), lower for production (20/hour)
+const isDevelopment = process.env.NODE_ENV !== 'production'
+const claudeLimit = isDevelopment ? 100 : 20
+
 const upstashClaudeRateLimiter = redis
   ? new Ratelimit({
       redis,
-      limiter: Ratelimit.slidingWindow(20, '1 h'),
+      limiter: Ratelimit.slidingWindow(claudeLimit, '1 h'),
       analytics: true,
       prefix: 'ratelimit:claude',
     })
   : null
 
-const inMemoryClaudeRateLimiter = new InMemoryRateLimiter(20, 60 * 60 * 1000)
+const inMemoryClaudeRateLimiter = new InMemoryRateLimiter(claudeLimit, 60 * 60 * 1000)
 
 export const claudeRateLimiter = {
   check: async (identifier: string) => {

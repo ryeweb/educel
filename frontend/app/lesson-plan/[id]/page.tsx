@@ -8,7 +8,9 @@ import { Card, CardContent } from '@/components/ui/card'
 import { LoadingSpinner } from '@/components/loading'
 import { ActionButtons } from '@/components/action-buttons'
 import { NavMenu } from '@/components/nav-menu'
+import { AIDisclaimer } from '@/components/ai-disclaimer'
 import type { LessonPlan } from '@/lib/types'
+import { EVENT_TYPES } from '@/lib/discovery'
 import {
   ArrowLeft,
   GraduationCap,
@@ -79,6 +81,19 @@ export default function LessonPlanPage({ params }: { params: Promise<{ id: strin
           body: JSON.stringify({ item_type: 'lesson_plan', item_id: resolvedParams.id }),
         })
         setIsSaved(true)
+
+        // Log saved event
+        if (plan) {
+          fetch('/api/events', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              event_type: EVENT_TYPES.SAVED,
+              topic: plan.topic,
+              learn_item_id: plan.learn_item_id,
+            }),
+          }).catch(e => console.error('Event logging failed:', e))
+        }
       }
     } catch (error) {
       console.error('Error toggling save:', error)
@@ -156,7 +171,7 @@ export default function LessonPlanPage({ params }: { params: Promise<{ id: strin
         </div>
       </header>
 
-      <main className="container py-8 max-w-3xl mx-auto">
+      <main className="container py-8 max-w-3xl mx-auto pb-32">
         {/* Header */}
         <div className="mb-6">
           <h1 className="text-3xl font-bold mb-2 font-[family-name:var(--font-dm-sans)]">
@@ -189,9 +204,12 @@ export default function LessonPlanPage({ params }: { params: Promise<{ id: strin
         {/* Resources */}
         <Card className="mb-6">
           <CardContent className="p-6">
-            <h2 className="text-xl font-semibold mb-4 font-[family-name:var(--font-dm-sans)]">
-              Resources
-            </h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold font-[family-name:var(--font-dm-sans)]">
+                Resources
+              </h2>
+              <span className="text-xs text-muted-foreground italic">AI-suggested</span>
+            </div>
             <div className="space-y-3">
               {plan.resources.slice(0, 5).map((resource, i) => (
                 <a
@@ -259,6 +277,11 @@ export default function LessonPlanPage({ params }: { params: Promise<{ id: strin
             </div>
           </CardContent>
         </Card>
+
+        {/* AI Disclaimer */}
+        <div className="mt-8">
+          <AIDisclaimer />
+        </div>
 
         {/* Action Buttons */}
         <ActionButtons

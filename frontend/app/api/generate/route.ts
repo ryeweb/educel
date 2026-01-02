@@ -4,6 +4,7 @@ import { GenerateRequest, LearnContent, TopicOption, ClarifyResponse, ExpandedCo
 import { claudeRateLimiter, checkRateLimit } from '@/lib/rate-limit'
 import { createClient } from '@/lib/supabase/server'
 import { withTimeout, TIMEOUTS, TimeoutError } from '@/lib/timeout'
+import { normalizeTopic, generateSessionId } from '@/lib/discovery'
 
 const anthropic = new Anthropic({
   apiKey: process.env.CLAUDE_API_KEY,
@@ -74,7 +75,9 @@ function isValidExpandedContent(obj: unknown): obj is ExpandedContent {
     Array.isArray(data.paragraphs) &&
     data.paragraphs.length >= 3 &&
     data.paragraphs.length <= 6 &&
-    data.paragraphs.every((p: unknown) => typeof p === 'string')
+    data.paragraphs.every((p: unknown) => typeof p === 'string') &&
+    typeof data.one_line_takeaway === 'string' &&
+    data.one_line_takeaway.length > 0
   )
 }
 
@@ -91,6 +94,58 @@ function isValidLessonPlan(obj: unknown): obj is LessonPlanContent {
     Array.isArray(data.daily_plan) &&
     data.daily_plan.length >= 7
   )
+}
+
+// Personalization helpers
+async function getTopicEngagement(supabase: any, userId: string): Promise<Map<string, number>> {
+  // Get events from last 14 days
+  const { data: events } = await supabase
+    .from('user_events')
+    .select('event_type, topic')
+    .eq('user_id', userId)
+    .gte('created_at', new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString())
+    .not('topic', 'is', null)
+
+  if (!events || events.length === 0) {
+    return new Map()
+  }
+
+  // Simple scoring: saved > quiz > plan > clicked > viewed
+  const weights: Record<string, number> = {
+    'saved': 4,
+    'quiz_completed': 3,
+    'plan_generated': 6,
+    'topic_clicked': 2,
+    'content_viewed': 1,
+  }
+
+  const scores = new Map<string, number>()
+
+  for (const event of events) {
+    const topic = normalizeTopic(event.topic)
+    const weight = weights[event.event_type] || 1
+    scores.set(topic, (scores.get(topic) || 0) + weight)
+  }
+
+  return scores
+}
+
+async function getRecentTopics(supabase: any, userId: string): Promise<Set<string>> {
+  // Get last 30 shown topics for repeat avoidance
+  const { data: recos } = await supabase
+    .from('home_recos')
+    .select('topic')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(30)
+
+  const topics = new Set<string>()
+  if (recos) {
+    for (const reco of recos) {
+      topics.add(normalizeTopic(reco.topic))
+    }
+  }
+  return topics
 }
 
 function getSystemPrompt(depth: 'concise' | 'deeper'): string {
@@ -115,23 +170,30 @@ Content Rules:
 You MUST respond with valid JSON only. No markdown, no explanation, just the JSON object.`
 }
 
-function getPromptForType(request: GenerateRequest): string {
-  const { type, preferred_topics, topic, custom_topic, prior_item } = request
-  
+function getPromptForType(request: GenerateRequest & { avoid_topics?: string[]; top_engaged_topic?: string }): string {
+  const { type, preferred_topics, topic, custom_topic, prior_item, avoid_topics, top_engaged_topic } = request
+
   switch (type) {
     case 'topic_options':
-      return `Generate 3 learning topic suggestions based on these preferred areas: ${preferred_topics.join(', ')}
+      const avoidNote = avoid_topics && avoid_topics.length > 0
+        ? `\n\nIMPORTANT - Do NOT suggest these recently shown topics: ${avoid_topics.join(', ')}`
+        : ''
+      const engagementHint = top_engaged_topic
+        ? `\n\nPersonalization hint: The user recently engaged with "${top_engaged_topic}". Consider this when choosing topics, but ensure variety.`
+        : ''
+
+      return `Generate 3 learning topic suggestions based on these preferred areas: ${preferred_topics.join(', ')}${engagementHint}${avoidNote}
 
 Respond with ONLY this JSON structure:
 {
   "options": [
-    {"topic": "Specific topic title", "hook": "One intriguing line about why this matters"},
-    {"topic": "Specific topic title", "hook": "One intriguing line about why this matters"},
-    {"topic": "Specific topic title", "hook": "One intriguing line about why this matters"}
+    {"topic": "Specific Topic Title In Title Case", "hook": "One intriguing line about why this matters"},
+    {"topic": "Specific Topic Title In Title Case", "hook": "One intriguing line about why this matters"},
+    {"topic": "Specific Topic Title In Title Case", "hook": "One intriguing line about why this matters"}
   ]
 }
 
-Make topics specific and immediately actionable (not broad categories). Hooks should create curiosity.`
+IMPORTANT: Use proper Title Case for all topics (capitalize first letter of main words). Make topics specific and immediately actionable (not broad categories). Hooks should create curiosity. All 3 topics MUST be distinct from each other and from the avoid list.`
 
     case 'adjacent_options':
       return `Based on the topic "${topic}", suggest 3 related but distinct topics the user might want to explore next.
@@ -184,7 +246,12 @@ Respond with ONLY this JSON structure:
   ]
 }
 
-For sources: Try to include 1-2 relevant links from credible publications (HBR, MIT Sloan, reputable sites). If unsure, you may omit the sources array.
+CRITICAL - Sources rules:
+- ONLY include sources from well-known, established websites that you're confident exist
+- Good domains: hbr.org, sloanreview.mit.edu, hbs.edu, mckinsey.com, bcg.com, ted.com, youtube.com, wikipedia.org
+- Do NOT guess or fabricate URLs - it's better to omit the sources array entirely than to include uncertain links
+- If you include sources, use ONLY root domains or extremely common paths (e.g., https://hbr.org not https://hbr.org/2024/specific-article)
+- When uncertain, omit the sources array completely - fallback sources will be used automatically
 
 Ensure bullets are exactly 3 items. Make the micro_action immediately actionable.`
 
@@ -199,20 +266,29 @@ Create a deeper exploration that adds significant value beyond the summary.
 Respond with ONLY this JSON structure:
 {
   "paragraphs": [
-    "First paragraph - deeper context or background (3-4 sentences)",
-    "Second paragraph - key concept explained in more detail (3-4 sentences)", 
-    "Third paragraph - practical implications or nuances (3-4 sentences)",
-    "Fourth paragraph - advanced insight or counterintuitive take (3-4 sentences)",
-    "Fifth paragraph - how experts think about this differently (3-4 sentences)"
+    "First paragraph - deeper context or background",
+    "Second paragraph - key concept explained in more detail",
+    "Third paragraph - practical implications or nuances",
+    "Fourth paragraph - advanced insight or counterintuitive take",
+    "Fifth paragraph - how experts think about this differently"
   ],
   "additional_bullets": [
     "Advanced insight 1",
     "Advanced insight 2",
     "Advanced insight 3"
-  ]
+  ],
+  "one_line_takeaway": "A single memorable sentence summarizing the core insight (max 100 characters)"
 }
 
-Write 4-6 paragraphs. Each paragraph should be substantive (3-4 sentences). Don't repeat what was in the summary.`
+Writing guidelines for easier reading:
+- Write 4-6 paragraphs, each with 2-3 sentences (shorter is better)
+- Use conversational, accessible language - avoid academic or overly formal tone
+- Prefer simple words over complex ones where possible
+- Break complex ideas into clear, digestible chunks
+- Use active voice and direct statements
+- Make it feel like a knowledgeable friend explaining, not a textbook
+- Don't repeat what was in the summary - add new depth and perspective
+- The one_line_takeaway should capture the most important insight for future recall`
 
     case 'lesson_plan':
       return `Create a comprehensive lesson plan for learning: "${topic}"
@@ -248,6 +324,18 @@ Respond with ONLY this JSON structure:
     {"day": 7, "focus": "Review", "activities": ["Quiz yourself", "Plan next steps"]}
   ]
 }
+
+CRITICAL - Resources rules:
+- ONLY use URLs from well-established platforms you're absolutely certain exist
+- Safe domains for each type:
+  * Articles: hbr.org, sloanreview.mit.edu, mckinsey.com, medium.com
+  * Books: amazon.com, goodreads.com
+  * Videos: youtube.com, ted.com, vimeo.com
+  * Courses: coursera.org, edx.org, udemy.com, linkedin.com/learning
+  * Tools: Use root domains only (e.g., notion.so, figma.com, not specific paths)
+- Use ONLY root domains or extremely common paths - avoid specific article/video URLs
+- For books, use generic Amazon/Goodreads homepage, not specific book pages
+- Better to use fewer, reliable resources than to include uncertain links
 
 Include 5-7 resources of mixed types. Create a 7-14 day plan that builds progressively.`
 
@@ -398,8 +486,56 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // Enhanced request with personalization data
+    let enhancedRequest = { ...body }
+
+    // For topic_options, check cache first (10 min TTL)
+    if (type === 'topic_options') {
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString()
+
+      const { data: cachedOptions } = await supabase
+        .from('topic_options_cache')
+        .select('*')
+        .eq('user_id', user.id)
+        .gte('created_at', tenMinutesAgo)
+        .single()
+
+      // Return cached options if fresh
+      if (cachedOptions?.options) {
+        return NextResponse.json({
+          ...cachedOptions.options,
+          _meta: { cached: true, session_id: cachedOptions.session_id },
+        })
+      }
+
+      // Otherwise, add personalization for fresh generation
+      const [engagementScores, recentTopics] = await Promise.all([
+        getTopicEngagement(supabase, user.id),
+        getRecentTopics(supabase, user.id),
+      ])
+
+      // Find top engaged topic for hint
+      let topEngagedTopic: string | undefined
+      let maxScore = 0
+      for (const [topic, score] of engagementScores.entries()) {
+        if (score > maxScore) {
+          maxScore = score
+          topEngagedTopic = topic
+        }
+      }
+
+      // Build avoid list
+      const avoidTopics = Array.from(recentTopics)
+
+      enhancedRequest = {
+        ...body,
+        avoid_topics: avoidTopics,
+        top_engaged_topic: topEngagedTopic,
+      }
+    }
+
     const systemPrompt = getSystemPrompt(depth)
-    const userPrompt = getPromptForType(body)
+    const userPrompt = getPromptForType(enhancedRequest)
 
     let validateFn: (obj: unknown) => boolean
     
@@ -439,6 +575,51 @@ export async function POST(req: NextRequest) {
       TIMEOUTS.CLAUDE_API,
       'AI generation timed out. Please try again.'
     )
+
+    // For topic_options, save recommendations, cache, and log event
+    if (type === 'topic_options' && result && typeof result === 'object' && 'options' in result) {
+      const sessionId = generateSessionId()
+      const options = (result as { options: TopicOption[] }).options
+      const slots = ['A', 'B', 'C'] as const
+
+      // Save to home_recos
+      const recoRows = options.map((option, idx) => ({
+        user_id: user.id,
+        session_id: sessionId,
+        slot: slots[idx],
+        topic: normalizeTopic(option.topic),
+      }))
+
+      await supabase.from('home_recos').insert(recoRows)
+
+      // Cache topic options for 10 minutes
+      await supabase
+        .from('topic_options_cache')
+        .upsert({
+          user_id: user.id,
+          options: result,
+          session_id: sessionId,
+        }, {
+          onConflict: 'user_id',
+        })
+
+      // Log reco_shown event
+      await supabase.from('user_events').insert({
+        user_id: user.id,
+        event_type: 'reco_shown',
+        meta: {
+          session_id: sessionId,
+          topics: options.map(o => o.topic),
+          slots: ['A', 'B', 'C'],
+        },
+      })
+
+      // Return with session_id for client tracking
+      return NextResponse.json({
+        ...result as object,
+        _meta: { usedFallbackSources, session_id: sessionId }
+      })
+    }
 
     return NextResponse.json({
       ...result as object,

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -8,13 +8,13 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { LoadingSpinner, TopicCardSkeleton } from '@/components/loading'
 import { RotatingHeadline } from '@/components/rotating-headline'
-import { ThemeDropdown } from '@/components/theme-dropdown'
 import { TopicIcon } from '@/components/topic-icon'
 import { NavMenu } from '@/components/nav-menu'
 import { MoreHorizontal, BookOpen, Sparkles, Send, ArrowRight } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import type { UserPrefs, TopicOption, ClarifyResponse, LearnItem } from '@/lib/types'
 import { formatDate } from '@/lib/utils'
+import { generateSessionId, normalizeTopic, EVENT_TYPES } from '@/lib/discovery'
 
 export default function HomePage() {
   const router = useRouter()
@@ -29,16 +29,50 @@ export default function HomePage() {
   const [loadingTeach, setLoadingTeach] = useState(false)
   const [clarifyMode, setClarifyMode] = useState<ClarifyResponse | null>(null)
   const [recentItem, setRecentItem] = useState<LearnItem | null>(null)
-  
+
   // Auth state
   const [email, setEmail] = useState('')
   const [authLoading, setAuthLoading] = useState(false)
   const [authSent, setAuthSent] = useState(false)
   const [authError, setAuthError] = useState('')
 
+  // Discovery & prefetch state
+  const [sessionId, setSessionId] = useState<string>('')
+  const [prefetchedItems, setPrefetchedItems] = useState<Map<string, string>>(new Map())
+  const prefetchTimeouts = useRef<Map<string, NodeJS.Timeout>>(new Map())
+  const inFlightRequests = useRef<Map<string, Promise<any>>>(new Map())
+  const prefetchQueue = useRef<string[]>([])
+  const isPrefetching = useRef(false)
+
+  // Persist prefetchedItems to sessionStorage
+  useEffect(() => {
+    if (prefetchedItems.size > 0) {
+      try {
+        const obj = Object.fromEntries(prefetchedItems)
+        sessionStorage.setItem('prefetchedItems', JSON.stringify(obj))
+      } catch (error) {
+        console.error('Error saving prefetch cache:', error)
+      }
+    }
+  }, [prefetchedItems])
+
   const supabase = createClient()
 
   useEffect(() => {
+    // Generate session ID once on mount
+    setSessionId(generateSessionId())
+
+    // Load prefetched items from sessionStorage
+    try {
+      const cached = sessionStorage.getItem('prefetchedItems')
+      if (cached) {
+        const parsed = JSON.parse(cached)
+        setPrefetchedItems(new Map(Object.entries(parsed)))
+      }
+    } catch (error) {
+      console.error('Error loading prefetch cache:', error)
+    }
+
     checkUser()
   }, [])
 
@@ -99,8 +133,14 @@ export default function HomePage() {
         }),
       })
       const data = await res.json()
+
       if (data.options) {
         setTopicOptions(data.options)
+
+        // Store session_id from response if provided
+        if (data._meta?.session_id) {
+          setSessionId(data._meta.session_id)
+        }
       }
     } catch (error) {
       console.error('Error loading topics:', error)
@@ -155,63 +195,134 @@ export default function HomePage() {
     setRecentItem(null)
   }
 
-  async function handleThemeChange(theme: 'light' | 'dark' | 'auto') {
-    try {
-      await fetch('/api/prefs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          preferred_topics: prefs?.preferred_topics || [],
-          depth: prefs?.depth || 'concise',
-          theme,
-        }),
-      })
-    } catch (error) {
-      console.error('Error saving theme:', error)
-    }
-  }
+  // Process prefetch queue one at a time
+  const processPrefetchQueue = useCallback(async () => {
+    if (isPrefetching.current || prefetchQueue.current.length === 0) return
 
-  async function handleTopicSelect(topic: string) {
-    if (!prefs) return
-    setGeneratingTopic(topic)
-    
+    isPrefetching.current = true
+    const topic = prefetchQueue.current.shift()!
+    const normalized = normalizeTopic(topic)
+
     try {
-      const res = await fetch('/api/generate', {
+      const response = await fetch('/api/learn/prefetch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          type: 'learn_item',
-          preferred_topics: prefs.preferred_topics,
-          depth: prefs.depth,
           topic,
+          preferred_topics: prefs?.preferred_topics,
+          depth: prefs?.depth,
         }),
       })
-      const content = await res.json()
-      
-      if (content.error) {
-        console.error('Error generating content:', content.error)
+
+      const data = await response.json()
+
+      // If rate limited, put back in queue and wait longer
+      if (response.status === 429) {
+        console.warn('Rate limited, retrying in 2 seconds...')
+        prefetchQueue.current.unshift(topic) // Put back at front
+        isPrefetching.current = false
+        setTimeout(() => processPrefetchQueue(), 2000) // Wait 2 seconds
         return
       }
 
-      // Remove _meta before saving
-      const { _meta, ...cleanContent } = content
+      if (data.item) {
+        setPrefetchedItems(prev => new Map(prev).set(normalized, data.item.id))
+      } else if (data.error) {
+        console.warn('Prefetch failed:', data.error)
+      }
+    } catch (error) {
+      console.error('Prefetch error:', error)
+    } finally {
+      inFlightRequests.current.delete(normalized)
+      isPrefetching.current = false
 
-      const saveRes = await fetch('/api/learn', {
+      // Process next item in queue after 300ms delay
+      if (prefetchQueue.current.length > 0) {
+        setTimeout(() => processPrefetchQueue(), 300)
+      }
+    }
+  }, [prefs])
+
+  // Prefetch learn_item on hover with debouncing, deduplication, and queuing
+  const handlePrefetch = useCallback((topic: string) => {
+    if (!prefs) return
+    const normalized = normalizeTopic(topic)
+
+    if (prefetchedItems.has(normalized)) return // Already prefetched
+    if (inFlightRequests.current.has(normalized)) return // Already fetching
+    if (prefetchQueue.current.includes(topic)) return // Already queued
+
+    // Clear existing timeout for this topic
+    const existingTimeout = prefetchTimeouts.current.get(topic)
+    if (existingTimeout) {
+      clearTimeout(existingTimeout)
+    }
+
+    // Debounce: add to queue after 500ms hover
+    const timeout = setTimeout(() => {
+      prefetchQueue.current.push(topic)
+      processPrefetchQueue()
+    }, 500)
+
+    prefetchTimeouts.current.set(topic, timeout)
+  }, [prefs, prefetchedItems, processPrefetchQueue])
+
+  async function handleTopicSelect(topic: string, slot?: 'A' | 'B' | 'C') {
+    if (!prefs) return
+    setGeneratingTopic(topic)
+
+    try {
+      // Log topic_clicked event
+      fetch('/api/events', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          event_type: EVENT_TYPES.TOPIC_CLICKED,
           topic,
-          source_type: 'topic_choice',
-          content: cleanContent,
+          slot,
+          meta: { session_id: sessionId },
         }),
-      })
-      const saveData = await saveRes.json()
-      
-      if (saveData.item) {
-        router.push(`/learn/${saveData.item.id}`)
+      }).catch(e => console.error('Event logging failed:', e))
+
+      const normalized = normalizeTopic(topic)
+
+      // Check if already in-flight, reuse the same promise
+      let dataPromise = inFlightRequests.current.get(normalized)
+
+      if (!dataPromise) {
+        // Create new request
+        dataPromise = fetch('/api/learn/prefetch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            topic,
+            preferred_topics: prefs.preferred_topics,
+            depth: prefs.depth,
+          }),
+        }).then(res => res.json())
+
+        inFlightRequests.current.set(normalized, dataPromise)
+        dataPromise.finally(() => inFlightRequests.current.delete(normalized))
+      }
+
+      const data = await dataPromise
+
+      if (data.error) {
+        console.error('Error generating topic:', data.error)
+        alert('Failed to generate content. Please try again.')
+        return
+      }
+
+      // Navigate to the learn page
+      if (data.item?.id) {
+        router.push(`/learn/${data.item.id}`)
+      } else {
+        console.error('No item ID returned from prefetch')
+        alert('Failed to create learning item. Please try again.')
       }
     } catch (error) {
       console.error('Error:', error)
+      alert('An error occurred. Please try again.')
     } finally {
       setGeneratingTopic(null)
     }
@@ -427,10 +538,7 @@ export default function HomePage() {
             <BookOpen className="h-6 w-6 text-primary" />
             <span className="font-semibold text-lg font-[family-name:var(--font-dm-sans)]">Educel</span>
           </div>
-          <div className="flex items-center gap-1">
-            <ThemeDropdown onThemeChange={handleThemeChange} />
-            <NavMenu userEmail={user.email} />
-          </div>
+          <NavMenu userEmail={user.email} />
         </div>
       </header>
 
@@ -447,33 +555,41 @@ export default function HomePage() {
                 <TopicCardSkeleton />
               </>
             ) : (
-              topicOptions.map((option, i) => (
-                <Card 
-                  key={i} 
-                  className={`card-interactive group ${generatingTopic === option.topic ? 'opacity-70' : ''}`}
-                  onClick={() => !generatingTopic && handleTopicSelect(option.topic)}
-                >
-                  <CardContent className="p-5">
-                    <div className="flex items-start gap-4">
-                      <div className="icon-badge">
-                        {generatingTopic === option.topic ? (
-                          <LoadingSpinner className="h-5 w-5" />
-                        ) : (
-                          <TopicIcon topic={option.topic} className="h-5 w-5 text-primary" />
-                        )}
+              topicOptions.map((option, i) => {
+                const slots = ['A', 'B', 'C'] as const
+                const slot = slots[i]
+
+                return (
+                  <Card
+                    key={i}
+                    className={`card-interactive group ${generatingTopic === option.topic ? 'opacity-70' : ''}`}
+                    onClick={() => !generatingTopic && handleTopicSelect(option.topic, slot)}
+                    onMouseEnter={() => handlePrefetch(option.topic)}
+                    onFocus={() => handlePrefetch(option.topic)}
+                    tabIndex={0}
+                  >
+                    <CardContent className="p-5">
+                      <div className="flex items-start gap-4">
+                        <div className="icon-badge">
+                          {generatingTopic === option.topic ? (
+                            <LoadingSpinner className="h-5 w-5" />
+                          ) : (
+                            <TopicIcon topic={option.topic} className="h-5 w-5 text-primary" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-medium text-lg group-hover:text-primary transition-colors font-[family-name:var(--font-dm-sans)]">
+                            {option.topic}
+                          </h3>
+                          <p className="text-muted-foreground text-sm mt-1">
+                            {option.hook}
+                          </p>
+                        </div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-medium text-lg group-hover:text-primary transition-colors font-[family-name:var(--font-dm-sans)]">
-                          {option.topic}
-                        </h3>
-                        <p className="text-muted-foreground text-sm mt-1">
-                          {option.hook}
-                        </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))
+                    </CardContent>
+                  </Card>
+                )
+              })
             )}
           </div>
 

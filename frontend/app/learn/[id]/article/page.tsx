@@ -9,7 +9,9 @@ import { Separator } from '@/components/ui/separator'
 import { LoadingSpinner } from '@/components/loading'
 import { ActionButtons } from '@/components/action-buttons'
 import { NavMenu } from '@/components/nav-menu'
+import { AIDisclaimer } from '@/components/ai-disclaimer'
 import type { LearnItem, LearnContent, UserPrefs, ExpandedContent, LessonPlan } from '@/lib/types'
+import { EVENT_TYPES } from '@/lib/discovery'
 import {
   ArrowLeft,
   Check,
@@ -116,6 +118,19 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
           body: JSON.stringify({ item_type: 'learning', item_id: resolvedParams.id }),
         })
         setIsSaved(true)
+
+        // Log saved event
+        if (item) {
+          fetch('/api/events', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              event_type: EVENT_TYPES.SAVED,
+              topic: item.topic,
+              learn_item_id: item.id,
+            }),
+          }).catch(e => console.error('Event logging failed:', e))
+        }
       }
     } catch (error) {
       console.error('Error toggling save:', error)
@@ -168,17 +183,30 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
       // Remove _meta if present
       const { _meta, ...cleanData } = data
 
-      // Save expanded content to learn_item for caching
-      await fetch('/api/learn', {
+      // Save expanded content to learn_item for caching (including one_line_takeaway in column)
+      const patchRes = await fetch('/api/learn', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: item.id,
           expanded_content: cleanData,
+          one_line_takeaway: cleanData.one_line_takeaway,
         }),
       })
 
+      const patchData = await patchRes.json()
+
+      if (!patchRes.ok) {
+        console.error('Failed to save article:', patchData.error)
+        alert('Article generated but failed to save. Please try again.')
+        return
+      }
+
+      console.log('Article saved successfully:', patchData)
       setExpandedContent(cleanData)
+
+      // Update item with saved data
+      setItem(patchData.item)
     } catch (error) {
       console.error('Error:', error)
     } finally {
@@ -225,6 +253,17 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
       const saveData = await saveRes.json()
 
       if (saveData.plan) {
+        // Log lesson plan generation event
+        fetch('/api/events', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            event_type: EVENT_TYPES.PLAN_GENERATED,
+            topic: item.topic,
+            learn_item_id: item.id,
+          }),
+        }).catch(e => console.error('Event logging failed:', e))
+
         // Navigate to the lesson plan page
         router.push(`/lesson-plan/${saveData.plan.id}`)
       }
@@ -278,7 +317,7 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
         </div>
       </header>
 
-      <main className="container py-8 max-w-3xl mx-auto">
+      <main className="container py-8 max-w-3xl mx-auto pb-32">
         {/* Learning card summary */}
         <Card className="mb-6">
           <CardContent className="p-6">
@@ -340,9 +379,12 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
               <Button
                 onClick={handleGenerateArticle}
                 disabled={loadingExpand}
+                className={loadingExpand ? 'relative overflow-hidden' : ''}
               >
                 {loadingExpand ? (
-                  <LoadingSpinner className="h-4 w-4" />
+                  <span className="relative inline-block">
+                    <span className="shimmer-text">Generating...</span>
+                  </span>
                 ) : (
                   'Generate Article'
                 )}
@@ -376,6 +418,11 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
               )}
             </Button>
           )}
+        </div>
+
+        {/* AI Disclaimer */}
+        <div className="mt-8">
+          <AIDisclaimer />
         </div>
 
         {/* Action Buttons */}

@@ -11,6 +11,8 @@ import { Separator } from '@/components/ui/separator'
 import { LoadingSpinner } from '@/components/loading'
 import { ActionButtons } from '@/components/action-buttons'
 import { NavMenu } from '@/components/nav-menu'
+import { AIDisclaimer } from '@/components/ai-disclaimer'
+import { EVENT_TYPES } from '@/lib/discovery'
 import type { LearnItem, LearnContent, TopicOption, UserPrefs, ExpandedContent, LessonPlan, LessonPlanContent } from '@/lib/types'
 import {
   ArrowLeft,
@@ -44,6 +46,10 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
   const [adjacentOptions, setAdjacentOptions] = useState<TopicOption[] | null>(null)
   const [loadingAdjacent, setLoadingAdjacent] = useState(false)
 
+  // Event tracking state
+  const [viewLogged, setViewLogged] = useState(false)
+  const [sessionId] = useState(() => crypto.randomUUID())
+
   const supabase = createClient()
 
   useEffect(() => {
@@ -68,10 +74,28 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
         navigateToNext()
       }
     }
-    
+
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [currentIndex, allItems])
+
+  // Log content_viewed event once per session
+  useEffect(() => {
+    if (item && !viewLogged) {
+      fetch('/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event_type: EVENT_TYPES.CONTENT_VIEWED,
+          topic: item.topic,
+          learn_item_id: item.id,
+          meta: { session_id: sessionId },
+        }),
+      }).catch(e => console.error('Event logging failed:', e))
+
+      setViewLogged(true)
+    }
+  }, [item, viewLogged, sessionId])
 
   async function loadItem() {
     setLoading(true)
@@ -142,6 +166,19 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
           body: JSON.stringify({ item_type: 'learning', item_id: resolvedParams.id }),
         })
         setIsSaved(true)
+
+        // Log saved event
+        if (item) {
+          fetch('/api/events', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              event_type: EVENT_TYPES.SAVED,
+              topic: item.topic,
+              learn_item_id: item.id,
+            }),
+          }).catch(e => console.error('Event logging failed:', e))
+        }
       }
     } catch (error) {
       console.error('Error toggling save:', error)
@@ -320,7 +357,7 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
         </div>
       </header>
 
-      <main className="container py-8 max-w-2xl mx-auto">
+      <main className="container py-8 max-w-2xl mx-auto pb-32">
         {/* Main content card */}
         <Card className="mb-6">
           <CardContent className="p-6 md:p-8">
@@ -362,10 +399,13 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
             {/* Sources - only show if available */}
             {content.sources && content.sources.length > 0 && (
               <div className="border-t pt-6">
-                <h3 className="font-medium mb-3 flex items-center gap-2 text-sm">
-                  <LinkIcon className="h-4 w-4" />
-                  Suggested starting points
-                </h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-medium flex items-center gap-2 text-sm">
+                    <LinkIcon className="h-4 w-4" />
+                    Suggested starting points
+                  </h3>
+                  <span className="text-xs text-muted-foreground italic">AI-suggested</span>
+                </div>
                 <div className="space-y-2">
                   {content.sources.map((source, i) => (
                     <a
@@ -405,10 +445,22 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
                     <p className="text-sm">{content.quiz_answer}</p>
                   </div>
                 ) : (
-                  <Button 
-                    variant="outline" 
+                  <Button
+                    variant="outline"
                     size="sm"
-                    onClick={() => setShowAnswer(true)}
+                    onClick={() => {
+                      setShowAnswer(true)
+                      // Log quiz completion event
+                      fetch('/api/events', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          event_type: EVENT_TYPES.QUIZ_COMPLETED,
+                          topic: item.topic,
+                          learn_item_id: item.id,
+                        }),
+                      }).catch(e => console.error('Event logging failed:', e))
+                    }}
                   >
                     Show answer
                   </Button>
@@ -479,6 +531,11 @@ export default function LearnPage({ params }: { params: Promise<{ id: string }> 
               )}
             </Button>
           )}
+        </div>
+
+        {/* AI Disclaimer */}
+        <div className="mt-8">
+          <AIDisclaimer />
         </div>
 
         {/* Action Buttons */}
